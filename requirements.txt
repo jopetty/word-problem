@@ -1,0 +1,16 @@
+# git+https://github.com/alreich/abstract_algebra.git#egg=abstract-algebra
+ipykernel
+numpy
+polars
+fire
+pyrootutils
+torch
+datasets
+accelerate
+evaluate
+scikit-learn
+numpy
+torchtext
+tqdm
+wandb
+pydotenv
