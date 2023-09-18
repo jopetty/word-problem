@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, List, Optional
 from accelerate.logging import get_logger
 import fire
 import pyrootutils
@@ -83,6 +83,25 @@ class EncoderModel(nn.Module):
     x = x.mean(dim=1)
     logits = self.classifier(x)
     return logits
+
+def compute_metrics(metrics: List, prefix: Optional[str] = None) -> dict:
+  values_dict = {}
+  for metric in metrics:
+    if metric.name == "accuracy":
+      values_dict[metric.name] = metric.compute()["accuracy"]
+    elif metric.name in ["precision", "recall"]:
+      values_dict[metric.name] = metric.compute(
+        average="weighted", 
+        zero_division=0)[metric.name]
+    elif metric.name == "f1":
+      values_dict[metric.name] = metric.compute(
+        average="weighted")[metric.name]
+  
+  if prefix is not None:
+    values_dict = {f"{prefix}/{k}": v for k, v in values_dict.items()}
+  
+  return values_dict
+
 
 def main(
   data: str = "S5_1",
@@ -241,18 +260,7 @@ def main(
 
         t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
 
-      train_metrics = {}
-      for metric in metrics:
-        if metric.name == "accuracy":
-          train_metrics[metric.name] = metric.compute()["accuracy"]
-        elif metric.name in ["precision", "recall"]:
-          train_metrics[metric.name] = metric.compute(
-            average="weighted", 
-            zero_division=0)[metric.name]
-        elif metric.name == "f1":
-          train_metrics[metric.name] = metric.compute(
-            average="weighted")[metric.name]
-      train_metrics = {f"train/{k}": v for k, v in train_metrics.items()}
+      train_metrics = compute_metrics(metrics, prefix="train")
       train_metrics["train/loss"] = np.mean(train_loss)
       accelerator.log(train_metrics, step=global_step)
 
@@ -267,17 +275,7 @@ def main(
         for metric in metrics:
           metric.add_batch(predictions=predictions.argmax(dim=-1), references=references)
       
-      eval_metrics = {}
-      for metric in metrics:
-        if metric.name == "accuracy":
-          eval_metrics[metric.name] = metric.compute()["accuracy"]
-        elif metric.name in ["precision", "recall"]:
-          eval_metrics[metric.name] = metric.compute(
-            average="weighted", zero_division=0)[metric.name]
-        elif metric.name == "f1":
-          eval_metrics[metric.name] = metric.compute(
-            average="weighted")[metric.name]
-      eval_metrics = {f"val/{k}": v for k, v in eval_metrics.items()}
+      eval_metrics = compute_metrics(metrics, prefix="val")
       accelerator.log(eval_metrics, step=global_step)
 
       n_bar.set_postfix({"val/acc": eval_metrics["val/accuracy"]})
