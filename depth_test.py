@@ -106,6 +106,7 @@ def main(
   # Misc
   log_level: str = "INFO",
   seed: int = randint(0, 1_000_000),
+  project_name: str = "depth-test-2",
 ):
   
   set_seed(seed)
@@ -135,7 +136,7 @@ def main(
   log.info("Dataset: ", dataset)
   print(dataset)
 
-  # Figure out the number of unique tokens in the dataset
+  # Count number of unique tokens in dataset
   n_vocab = pl.read_csv(data_path).with_columns(
     pl.concat_str(
       [pl.col("input"), pl.col("target")], 
@@ -145,7 +146,6 @@ def main(
   )).explode("merged").unique().shape[0]
 
   # Set up logger
-  project_name = "depth-test"
   project_hps = {
     "sequence_length": int(data.split("_")[1]),
     "dataset": data,
@@ -205,11 +205,6 @@ def main(
       optimizer, 
       train_dataloader,
       eval_dataloader)
-    
-    # progress_bar = tqdm(
-    #   train_dataloader, 
-    #   disable=not accelerator.is_local_main_process,
-    #   desc="Batch")
 
     # Construct metrics
     metrics = [
@@ -219,10 +214,13 @@ def main(
       load_metric("f1")
     ]
     
-    for epoch in range(epochs):
+    global_step = 0
+    for _ in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
       model.train()
-      for batch in tqdm(train_dataloader, desc="Batch"):
+      train_loss = []
+      for batch in (t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)):
 
+        global_step += 1
         optimizer.zero_grad()
 
         source = batch["input"]
@@ -230,36 +228,36 @@ def main(
         output = model(source)
 
         loss = F.cross_entropy(output, target)
+        train_loss.append(loss.item())
 
         predictions, references = accelerator.gather_for_metrics(
           (output, target))
-        train_metrics = {}
+        
         for metric in metrics:
-          if metric.name == "accuracy":
-            train_metrics[metric.name] = metric.compute(
-              predictions=predictions.argmax(dim=-1),
-              references=references)["accuracy"]
-          elif metric.name in ["precision", "recall"]:
-            train_metrics[metric.name] = metric.compute(
-              predictions=predictions.argmax(dim=-1),
-              references=references,
-              average="weighted", 
-              zero_division=0)[metric.name]
-          elif metric.name == "f1":
-            train_metrics[metric.name] = metric.compute(
-              predictions=predictions.argmax(dim=-1),
-              references=references,
-              average="weighted")[metric.name]
-        train_metrics = {f"train/{k}": v for k, v in train_metrics.items()}
-        train_metrics["train/loss"] = loss.item()
-
+          metric.add_batch(
+            predictions=predictions.argmax(dim=-1), references=references)
         accelerator.backward(loss)
         optimizer.step()
 
-        accelerator.log(train_metrics)
+        t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
+
+      train_metrics = {}
+      for metric in metrics:
+        if metric.name == "accuracy":
+          train_metrics[metric.name] = metric.compute()["accuracy"]
+        elif metric.name in ["precision", "recall"]:
+          train_metrics[metric.name] = metric.compute(
+            average="weighted", 
+            zero_division=0)[metric.name]
+        elif metric.name == "f1":
+          train_metrics[metric.name] = metric.compute(
+            average="weighted")[metric.name]
+      train_metrics = {f"train/{k}": v for k, v in train_metrics.items()}
+      train_metrics["train/loss"] = np.mean(train_loss)
+      accelerator.log(train_metrics, step=global_step)
 
       model.eval()
-      for batch in tqdm(eval_dataloader, desc="Eval batch"):
+      for batch in (e_bar := tqdm(eval_dataloader, desc="Eval", position=2, leave=False)):
         source = batch["input"]
         target = batch["target"]
         with torch.no_grad():
@@ -280,8 +278,9 @@ def main(
           eval_metrics[metric.name] = metric.compute(
             average="weighted")[metric.name]
       eval_metrics = {f"val/{k}": v for k, v in eval_metrics.items()}
-      accelerator.print(f"epoch {epoch}:", eval_metrics)
-      accelerator.log(eval_metrics)
+      accelerator.log(eval_metrics, step=global_step)
+
+      n_bar.set_postfix({"val/acc": eval_metrics["val/accuracy"]})
 
     accelerator.end_training()
 
