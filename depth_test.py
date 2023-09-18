@@ -104,7 +104,7 @@ def compute_metrics(metrics: List, prefix: Optional[str] = None) -> dict:
 
 
 def main(
-  data: str = "S5_1",
+  data: str = "S5=1",
   data_dir: Union[str, Path] = PROJECT_ROOT / "data",
   mode: str = "train",
   # Transformer parameters
@@ -125,7 +125,7 @@ def main(
   # Misc
   log_level: str = "INFO",
   seed: int = randint(0, 1_000_000),
-  project_name: str = "depth-test-2",
+  project_name: str = "word_problems",
 ):
   
   set_seed(seed)
@@ -166,8 +166,8 @@ def main(
 
   # Set up logger
   project_hps = {
-    "sequence_length": int(data.split("_")[1]),
-    "dataset": data,
+    "sequence_length": int(data.split("=")[1]),
+    "dataset": data.split("=")[0],
     "d_model": d_model,
     "nhead": nhead,
     "dim_feedforward": dim_feedforward,
