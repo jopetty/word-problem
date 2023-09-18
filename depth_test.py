@@ -32,7 +32,8 @@ class PositionalEncoding(nn.Module):
     self.dropout = nn.Dropout(p=dropout)
 
     position = torch.arange(max_len).unsqueeze(1)
-    div_term = torch.exp(torch.arange(0, d_model, 2) * (-np.log(10000.0) / d_model))
+    div_term = torch.exp(
+      torch.arange(0, d_model, 2) * (-np.log(10000.0) / d_model))
     pe = torch.zeros(max_len, 1, d_model)
     pe[:, 0, 0::2] = torch.sin(position * div_term)
     pe[:, 0, 1::2] = torch.cos(position * div_term)
@@ -79,22 +80,12 @@ class EncoderModel(nn.Module):
   def forward(self, x):
     x = self.pos_enc(self.embedding(x))
     x = self.encoder(x)
-    # print(x.shape)
     x = x.mean(dim=1)
-    # print(x.shape)
     logits = self.classifier(x)
-    # print(logits.shape)
-    # raise SystemExit
     return logits
 
-def compute_metrics(targets, pred_logits):
-
-  acc_metric = load_metric("accuracy")
-  predictions = pred_logits.argmax(dim=-1)
-  return acc_metric.compute(predictions=predictions, references=targets)
-
 def main(
-  data: str = "s5_1",
+  data: str = "S5_1",
   data_dir: Union[str, Path] = PROJECT_ROOT / "data",
   mode: str = "train",
   # Transformer parameters
@@ -119,11 +110,8 @@ def main(
   
   set_seed(seed)
 
-  seq_len = data.split("_")[1]
-
   accelerator = Accelerator(log_with="wandb")
   # accelerator = Accelerator()
-  
   log.setLevel(log_level)
   
   assert mode in ["train", "test"], "mode must be either 'train' or 'test'"
@@ -149,7 +137,9 @@ def main(
 
   # Figure out the number of unique tokens in the dataset
   n_vocab = pl.read_csv(data_path).with_columns(
-    pl.concat_str([pl.col("input"), pl.col("target")], separator=" ").alias("merged")
+    pl.concat_str(
+      [pl.col("input"), pl.col("target")], 
+      separator=" ").alias("merged")
   ).select(pl.col("merged").map_batches(
     lambda x: x.str.split(" ")
   )).explode("merged").unique().shape[0]
@@ -157,7 +147,7 @@ def main(
   # Set up logger
   project_name = "depth-test"
   project_hps = {
-    "sequence_length": seq_len,
+    "sequence_length": int(data.split("_")[1]),
     "dataset": data,
     "d_model": d_model,
     "nhead": nhead,
@@ -205,20 +195,32 @@ def main(
       dataset["train"], 
       shuffle=True, 
       batch_size=batch_size)
+    eval_dataloader = DataLoader(
+      dataset["test"],
+      shuffle=False,
+      batch_size=batch_size)
 
-    model, optimizer, train_dataloader = accelerator.prepare(
+    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
       model, 
       optimizer, 
-      train_dataloader)
+      train_dataloader,
+      eval_dataloader)
     
     # progress_bar = tqdm(
     #   train_dataloader, 
     #   disable=not accelerator.is_local_main_process,
     #   desc="Batch")
+
+    # Construct metrics
+    metrics = [
+      load_metric("accuracy"),
+      load_metric("precision"),
+      load_metric("recall"),
+      load_metric("f1")
+    ]
     
-    
-    model.train()
-    for _ in range(epochs):
+    for epoch in range(epochs):
+      model.train()
       for batch in tqdm(train_dataloader, desc="Batch"):
 
         optimizer.zero_grad()
@@ -228,17 +230,59 @@ def main(
         output = model(source)
 
         loss = F.cross_entropy(output, target)
-        metrics = compute_metrics(target, output)
-        metrics["loss"] = loss.item()
-        accelerator.log(metrics)
+
+        predictions, references = accelerator.gather_for_metrics(
+          (output, target))
+        train_metrics = {}
+        for metric in metrics:
+          if metric.name == "accuracy":
+            train_metrics[metric.name] = metric.compute(
+              predictions=predictions.argmax(dim=-1),
+              references=references)["accuracy"]
+          elif metric.name in ["precision", "recall"]:
+            train_metrics[metric.name] = metric.compute(
+              predictions=predictions.argmax(dim=-1),
+              references=references,
+              average="weighted", 
+              zero_division=0)[metric.name]
+          elif metric.name == "f1":
+            train_metrics[metric.name] = metric.compute(
+              predictions=predictions.argmax(dim=-1),
+              references=references,
+              average="weighted")[metric.name]
+        train_metrics = {f"train/{k}": v for k, v in train_metrics.items()}
+        train_metrics["train/loss"] = loss.item()
 
         accelerator.backward(loss)
         optimizer.step()
-        # progress_bar.set_postfix({
-        #   "loss: ": f"{metrics['loss']:.2f}",
-        #   "acc": f"{metrics['accuracy']:.2f}"
-        # })
-      print({"loss": loss})
+
+        accelerator.log(train_metrics)
+
+      model.eval()
+      for batch in tqdm(eval_dataloader, desc="Eval batch"):
+        source = batch["input"]
+        target = batch["target"]
+        with torch.no_grad():
+          output = model(source)
+        predictions, references = accelerator.gather_for_metrics(
+          (output, target))
+        for metric in metrics:
+          metric.add_batch(predictions=predictions.argmax(dim=-1), references=references)
+      
+      eval_metrics = {}
+      for metric in metrics:
+        if metric.name == "accuracy":
+          eval_metrics[metric.name] = metric.compute()["accuracy"]
+        elif metric.name in ["precision", "recall"]:
+          eval_metrics[metric.name] = metric.compute(
+            average="weighted", zero_division=0)[metric.name]
+        elif metric.name == "f1":
+          eval_metrics[metric.name] = metric.compute(
+            average="weighted")[metric.name]
+      eval_metrics = {f"val/{k}": v for k, v in eval_metrics.items()}
+      accelerator.print(f"epoch {epoch}:", eval_metrics)
+      accelerator.log(eval_metrics)
+
     accelerator.end_training()
 
   else:
