@@ -10,9 +10,19 @@ If you only want to use the built-in data, you can just clone the repo and run `
 
 To train a model, run `python depth_test.py`. Command-line arguments to configure the training run are the arguments to the `main` function, which is the most accurate documentation for what to do. Some important ones:
 
-- `data`: the name of the file in the `data/` directory, without the `.csv` extension.
+- `data`: the name of the file in the `data/` directory, without the `.csv` extension. 
 - `num_layers`: how many layers in the transformer encoder.
 - `epochs`: the number of epochs to train for.
+
+### Data
+
+Data files are named `Group=SequenceLength.csv`, where `Group` is the group used to define the dataset and `SequenceLength` is the number of elements in each example input. Files have the structure
+
+```
+length,input,target
+```
+
+where `length` is equal to `SequenceLength`, `input` is a series of space-separated integers corresponding to the element index of the group as defined in the `abstract_algebra` object, and `target` is the element the sequence of input elements multiplies to (again, as the element index of the group object).
 
 ### Logging
 
