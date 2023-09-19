@@ -80,9 +80,17 @@ class EncoderModel(nn.Module):
     def forward(self, x):
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
-        x = x.mean(dim=1)
+        x = x[:, 0, :]
         logits = self.classifier(x)
         return logits
+
+
+def tokenize(example: dict) -> dict:
+    specials = ["[CLS]"]
+    tokenized = [int(t) for t in str(example["input"]).split()]
+    tokenized = [specials.index("[CLS]")] + tokenized
+
+    return {"input": tokenized, "target": int(example["target"])}
 
 
 def compute_metrics(metrics: list, prefix: str | None = None) -> dict:
@@ -143,12 +151,7 @@ def main(
 
     # "Tokenize" data by converting inputs back into lists of integers;
     #  allows us to leave the inputs as space-delimited strings in the CSV
-    dataset = dataset.map(
-        lambda ex: {
-            "input": list(map(int, str(ex["input"]).split())),
-            "target": int(ex["target"]),
-        }
-    )
+    dataset = dataset.map(tokenize)
     dataset = dataset.with_format(type="torch")
 
     assert train_split > 0 and train_split < 1, "train_split must be between 0 and 1"
