@@ -1,6 +1,5 @@
 from pathlib import Path
 from random import randint
-from typing import List, Optional, Union
 
 import fire
 import numpy as np
@@ -86,7 +85,7 @@ class EncoderModel(nn.Module):
         return logits
 
 
-def compute_metrics(metrics: List, prefix: Optional[str] = None) -> dict:
+def compute_metrics(metrics: list, prefix: str | None = None) -> dict:
     values_dict = {}
     for metric in metrics:
         if metric.name == "accuracy":
@@ -106,7 +105,7 @@ def compute_metrics(metrics: List, prefix: Optional[str] = None) -> dict:
 
 def main(
     data: str = "S5=1",
-    data_dir: Union[str, Path] = PROJECT_ROOT / "data",
+    data_dir: str | Path = PROJECT_ROOT / "data",
     mode: str = "train",
     # Transformer parameters
     d_model: int = 512,
