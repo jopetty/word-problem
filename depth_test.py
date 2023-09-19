@@ -136,6 +136,10 @@ def main(
     epochs: int = 10,
     batch_size: int = 32,
     lr: float = 1e-4,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    op_eps: float = 1e-8,
+    weight_decay: float = 0.01,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 1_000_000),
@@ -193,6 +197,9 @@ def main(
         "num_layers": num_layers,
         "n_vocab": n_vocab,
         "lr": lr,
+        "betas": (beta1, beta2),
+        "eps": op_eps,
+        "weight_decay": weight_decay,
         "seed": seed,
     }
 
@@ -222,7 +229,13 @@ def main(
         device = accelerator.device
 
         model = model.to(device)
-        optimizer = optim.Adam(model.parameters(), lr=lr)
+        optimizer = optim.AdamW(
+            model.parameters(),
+            lr=lr,
+            betas=(beta1, beta2),
+            eps=op_eps,
+            weight_decay=weight_decay,
+        )
         train_dataloader = DataLoader(
             dataset["train"], shuffle=True, batch_size=batch_size
         )
