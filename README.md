@@ -10,7 +10,7 @@ If you only want to use the built-in data, you can just clone the repo and run `
 
 To train a model, run `python depth_test.py`. Command-line arguments to configure the training run are the arguments to the `main` function, which is the most accurate documentation for what to do. Some important ones:
 
-- `data`: the name of the file in the `data/` directory, without the `.csv` extension. 
+- `data`: the name of the file in the `data/` directory, without the `.csv` extension.
 - `num_layers`: how many layers in the transformer encoder.
 - `epochs`: the number of epochs to train for.
 
@@ -18,7 +18,7 @@ To train a model, run `python depth_test.py`. Command-line arguments to configur
 
 Data files are named `Group=SequenceLength.csv`, where `Group` is the group used to define the dataset and `SequenceLength` is the number of elements in each example input. Files have the structure
 
-```
+```csv
 length,input,target
 ```
 
