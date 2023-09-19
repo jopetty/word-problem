@@ -243,7 +243,9 @@ def main(
         ]
 
         global_step = 0
-        for _ in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
+        for epoch in (
+            n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)
+        ):
             model.train()
             train_loss = []
             for batch in (
@@ -295,6 +297,7 @@ def main(
 
             eval_metrics = compute_metrics(metrics, prefix="val")
             accelerator.log(eval_metrics, step=global_step)
+            accelerator.log({"epoch": epoch}, step=global_step)
 
             n_bar.set_postfix({"val/acc": eval_metrics["val/accuracy"]})
 

@@ -60,20 +60,24 @@ def main(
     num_elements = len(group_prod.elements)
 
     if num_examples is None:
-        num_possible_sequences = num_elements**seq_length
         print(
-            f"Generating {num_elements} ^ {seq_length} = \
-              {num_possible_sequences} sequences."
+            f"Generating all {num_elements} ^ {seq_length} = "
+            f"{num_elements ** seq_length} sequences."
         )
         print("Output data will not be shuffled.")
 
         sequences = product(range(num_elements), repeat=seq_length)
 
     else:
+        if num_examples > num_elements:
+            print(
+                f"Warning: {num_examples} > {num_elements}. I will only"
+                "generate {num_elements} examples."
+            )
+            num_examples = num_elements
         print(
             f"Randomly sampling {num_examples}/{num_elements ** seq_length} sequences."
         )
-
         sequences = product(range(num_elements), repeat=seq_length)
         sequences = random.choices(list(sequences), k=num_examples)
 
