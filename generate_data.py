@@ -35,7 +35,7 @@ def generate_group(g: (str, int)) -> FiniteAlgebra:
     elif g[0] == "A":
         s_n = generate_symmetric_group(g[1])
         a_n = s_n.commutator_subalgebra()
-        a_n.name = f"A_{g[1]}"
+        a_n.name = f"A{g[1]}"
         return a_n
     else:
         raise ValueError("Group must be one of S, Z, or A")
