@@ -4,7 +4,6 @@ import sys
 from functools import partial, reduce
 from itertools import product
 from pathlib import Path
-from typing import List
 
 import fire
 import polars as pl
@@ -14,7 +13,7 @@ import pyrootutils
 # Without this line, all methods & submodules will fail to import
 sys.path.append("./abstract_algebra/src")
 
-from abstract_algebra.src.finite_algebras import (
+from abstract_algebra.src.finite_algebras import (  # noqa: E402
     FiniteAlgebra,
     generate_cyclic_group,
     generate_symmetric_group,
@@ -50,7 +49,7 @@ def generate_group(g: (str, int)) -> FiniteAlgebra:
 
 def main(
     num_examples: int | None = None,
-    seq_length: int | List[int] = 10,
+    seq_length: int | list[int] = 10,
     group: str = "S5",
     data_dir: str | Path = PROJECT_ROOT / "data",
     seed: int = random.randint(0, 1_000_000),
@@ -69,7 +68,8 @@ def main(
     if num_examples is None:
         num_possible_sequences = num_elements**seq_length
         print(
-            f"Generating {num_elements} ^ {seq_length} = {num_possible_sequences} sequences."
+            f"Generating {num_elements} ^ {seq_length} = \
+              {num_possible_sequences} sequences."
         )
         print("Output data will not be shuffled.")
 
