@@ -127,12 +127,12 @@ def main(
     log_level: str = "INFO",
     seed: int = randint(0, 1_000_000),
     project_name: str = "word_problems",
+    use_logger: bool = True,
 ):
 
     set_seed(seed)
 
-    accelerator = Accelerator(log_with="wandb")
-    # accelerator = Accelerator()
+    accelerator = Accelerator(log_with="wandb") if use_logger else Accelerator()
     log.setLevel(log_level)
 
     assert mode in ["train", "test"], "mode must be either 'train' or 'test'"
@@ -142,8 +142,8 @@ def main(
     dataset = load_dataset("csv", data_files=data_path, split="all")
     dataset = dataset.remove_columns(["length"])
 
-    # "Tokenize" data by converting inputs back into list of integers
-    #   instead of strings to make parsing the CSV easier
+    # "Tokenize" data by converting inputs back into lists of integers;
+    #  allows us to leave the inputs as space-delimited strings in the CSV
     dataset = dataset.map(
         lambda ex: {
             "input": list(map(int, str(ex["input"]).split())),
@@ -158,7 +158,7 @@ def main(
     log.info("Dataset: ", dataset)
     print(dataset)
 
-    # Count number of unique tokens in dataset
+    # Calculate n_vocab dynamically by counting unique tokens in dataset
     n_vocab = (
         pl.read_csv(data_path)
         .with_columns(
