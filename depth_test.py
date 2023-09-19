@@ -86,10 +86,11 @@ class EncoderModel(nn.Module):
 
 
 def tokenize(example: dict) -> dict:
+    # "Tokenize" data by converting inputs back into lists of integers;
+    #  allows us to leave the inputs as space-delimited strings in the CSV
     specials = ["[CLS]"]
     tokenized = [int(t) for t in str(example["input"]).split()]
     tokenized = [specials.index("[CLS]")] + tokenized
-
     return {"input": tokenized, "target": int(example["target"])}
 
 
@@ -145,17 +146,20 @@ def main(
     assert mode in ["train", "test"], "mode must be either 'train' or 'test'"
 
     # Load dataset
-    data_path = str(data_dir / f"{data}.csv")
-    dataset = load_dataset("csv", data_files=data_path, split="all")
-    dataset = dataset.remove_columns(["length"])
-
-    # "Tokenize" data by converting inputs back into lists of integers;
-    #  allows us to leave the inputs as space-delimited strings in the CSV
-    dataset = dataset.map(tokenize)
-    dataset = dataset.with_format(type="torch")
-
     assert train_split > 0 and train_split < 1, "train_split must be between 0 and 1"
-    dataset = dataset.train_test_split(train_size=train_split)
+    data_path = str(data_dir / f"{data}.csv")
+    # dataset = load_dataset("csv", data_files=data_path, split="all")
+    dataset = (
+        load_dataset("csv", data_files=data_path, split="all")
+        .remove_columns(["length"])
+        .map(tokenize)
+        .with_format(type="torch")
+        .train_test_split(train_size=train_split)
+    )
+    # dataset = dataset.remove_columns(["length"])
+    # dataset = dataset.map(tokenize)
+    # dataset = dataset.with_format(type="torch")
+    # dataset = dataset.train_test_split(train_size=train_split)
 
     log.info("Dataset: ", dataset)
     print(dataset)
