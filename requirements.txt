@@ -1,4 +1,4 @@
-# git+https://github.com/alreich/abstract_algebra.git#egg=abstract-algebra
+git+https://github.com/jopetty/abstract_algebra
 ipykernel
 numpy
 polars

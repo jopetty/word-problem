@@ -1,6 +1,5 @@
 import os
 import random
-import sys
 from functools import partial, reduce
 from itertools import product
 from pathlib import Path
@@ -8,12 +7,7 @@ from pathlib import Path
 import fire
 import polars as pl
 import pyrootutils
-
-# This package is not configured properly, I think.
-# Without this line, all methods & submodules will fail to import
-sys.path.append("./abstract_algebra/src")
-
-from abstract_algebra.src.finite_algebras import (  # noqa: E402
+from abstract_algebra.finite_algebras import (
     FiniteAlgebra,
     generate_cyclic_group,
     generate_symmetric_group,
