@@ -10,6 +10,7 @@ accelerate
 evaluate
 scikit-learn
 numpy
+pre-commit
 torchtext
 tqdm
 wandb
