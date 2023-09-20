@@ -12,6 +12,8 @@ conda env create && conda activate depth
 
 ## Use
 
+### Training
+
 To train a model, run `python depth_test.py`. Command-line arguments to configure the training run are the arguments to the `main` function, which is the most accurate documentation for what to do. Some important ones:
 
 - `--group`: the name of the file in the `data/` directory, without the `.csv` extension.
