@@ -1,4 +1,3 @@
-from functools import reduce
 from pathlib import Path
 from random import randint
 
@@ -124,16 +123,36 @@ def pad_collate(samples: list[dict]) -> dict:
 
 
 def get_dataset(
-    group: str, max_len: int, train_size: float, data_dir: str | Path
+    group: str,
+    max_len: int | None,
+    k: int | None,
+    train_size: float,
+    data_dir: str | Path,
 ) -> dict:
     assert train_size > 0 and train_size < 1, "`train_size` must be between 0 and 1"
-    assert max_len > 1, "`max_len` must be at least 2"
-    data_paths = [data_dir / f"{group}={i}.csv" for i in range(2, max_len)]
-    if not data_paths[0].exists():
-        raise FileNotFoundError(f"You must have data for {group}={2}.")
-    data_paths = [p for p in data_paths if p.exists()]
-    print("Constructing dataset from:")
-    print("  " + "\n  ".join(map(str, data_paths)))
+    print(max_len, k)
+
+    if max_len is None:
+        assert k is not None, "You must provide either `max_len` or `k`"
+    else:
+        assert max_len is not None, "You must provide either `max_len` or `k`"
+        assert k is None, "You must provide either `max_len` or `k`"
+
+    if max_len is not None:
+        assert max_len > 1, "`max_len` must be at least 2"
+        data_paths = [data_dir / f"{group}={i}.csv" for i in range(2, max_len + 1)]
+        if not data_paths[0].exists():
+            raise FileNotFoundError(f"You must have data for {group}={2}.")
+        data_paths = [p for p in data_paths if p.exists()]
+        print("Constructing dataset from:")
+        print("  " + "\n  ".join(map(str, data_paths)))
+    else:
+        assert k > 1, "`k` must be at least 2"
+        data_paths = [data_dir / f"{group}={i}.csv" for i in [2, k]]
+        if not data_paths[0].exists():
+            raise FileNotFoundError(f"You must have data for {group}={1}.")
+        print("Constructing dataset from:")
+        print("  " + "\n  ".join(map(str, data_paths)))
 
     # We can find n_vocab just by looking at the k=2 data, since this is
     # guaranteed to contain all the elements in the group.
@@ -160,9 +179,8 @@ def get_dataset(
             .train_test_split(train_size=train_size)
         )
     else:
-        pair_data_path, long_data_paths = data_paths[0], data_paths[1:]
         pair_data = (
-            load_dataset("csv", data_files=str(pair_data_path), split="all")
+            load_dataset("csv", data_files=str(data_paths[0]), split="all")
             .remove_columns(["length"])
             .map(tokenize)
             .with_format(type="torch")
@@ -174,10 +192,10 @@ def get_dataset(
                 .map(tokenize)
                 .with_format(type="torch")
             )
-            for p in long_data_paths
+            for p in data_paths[1:]
         ]
 
-        dataset = reduce(concatenate_datasets, long_data).train_test_split(
+        dataset = concatenate_datasets(long_data).train_test_split(
             train_size=train_size
         )
         dataset["train"] = concatenate_datasets([dataset["train"], pair_data])
@@ -209,9 +227,10 @@ def compute_metrics(metrics: list, prefix: str | None = None) -> dict:
 
 def main(
     # Data parameters
-    group: str = "S5=1",
+    group: str,
     data_dir: str | Path = PROJECT_ROOT / "data",
-    max_len: int = 3,
+    max_len: int | None = None,
+    k: int | None = None,
     train_split: float = 0.8,
     # Transformer parameters
     d_model: int = 512,
@@ -246,7 +265,7 @@ def main(
     assert mode in ["train", "test"], "mode must be either 'train' or 'test'"
 
     # Load dataset
-    datadict = get_dataset(group, max_len, train_split, data_dir)
+    datadict = get_dataset(group, max_len, k, train_split, data_dir)
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
     log.info("Dataset: ", dataset)
