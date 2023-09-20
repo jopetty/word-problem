@@ -113,7 +113,9 @@ def pad_collate(samples: list[dict]) -> dict:
         for channel in channels:
             if max_lens[channel] > 0:
                 s[channel] = F.pad(
-                    s[channel], (0, max_lens[channel] - s[channel].shape[0]), value=0
+                    s[channel],
+                    (0, max_lens[channel] - s[channel].shape[0]),
+                    value=SPECIALS.index("[PAD]"),
                 )
 
     collated = {}
