@@ -60,6 +60,7 @@ class EncoderModel(nn.Module):
         layer_norm_eps: float,
         norm_first: bool,
         num_layers: int,
+        weight_sharing: bool,
         n_vocab: int,
     ):
         super().__init__()
@@ -73,12 +74,60 @@ class EncoderModel(nn.Module):
             batch_first=True,
             norm_first=norm_first,
         )
+        self.weight_sharing = weight_sharing
+        self.num_layers = num_layers
         self.embedding = nn.Embedding(n_vocab, d_model)
         self.pos_enc = PositionalEncoding(d_model, dropout)
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
+
+        if weight_sharing:
+            if num_layers == 1:
+                print("Weight sharing has no effect for single-layer models.")
+            for i in range(1, num_layers):
+                self.encoder.layers[i].self_attn.in_proj_weight = self.encoder.layers[
+                    0
+                ].self_attn.in_proj_weight
+                self.encoder.layers[i].self_attn.in_proj_bias = self.encoder.layers[
+                    0
+                ].self_attn.in_proj_bias
+                self.encoder.layers[i].self_attn.out_proj.weight = self.encoder.layers[
+                    0
+                ].self_attn.out_proj.weight
+                self.encoder.layers[i].self_attn.out_proj.bias = self.encoder.layers[
+                    0
+                ].self_attn.out_proj.bias
+                self.encoder.layers[i].linear1.weight = self.encoder.layers[
+                    0
+                ].linear1.weight
+                self.encoder.layers[i].linear1.bias = self.encoder.layers[
+                    0
+                ].linear1.bias
+                self.encoder.layers[i].linear2.weight = self.encoder.layers[
+                    0
+                ].linear2.weight
+                self.encoder.layers[i].linear2.bias = self.encoder.layers[
+                    0
+                ].linear2.bias
+                self.encoder.layers[i].norm1.weight = self.encoder.layers[
+                    0
+                ].norm1.weight
+                self.encoder.layers[i].norm1.bias = self.encoder.layers[0].norm1.bias
+                self.encoder.layers[i].norm2.weight = self.encoder.layers[
+                    0
+                ].norm2.weight
+                self.encoder.layers[i].norm2.bias = self.encoder.layers[0].norm2.bias
+
+        # raise SystemExit
         self.classifier = nn.Linear(d_model, n_vocab)
 
     def forward(self, x):
+
+        if self.weight_sharing:
+            assert torch.equal(
+                self.encoder.layers[self.num_layers - 1].linear1.weight,
+                self.encoder.layers[0].linear1.weight,
+            ), "Weights not tied!"
+
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
         x = x[:, 0, :]
@@ -87,19 +136,19 @@ class EncoderModel(nn.Module):
 
 
 def tokenize(example: dict) -> dict:
-    #  "Tokenize" data by converting inputs back into lists of integers;
-    #  allows us to leave the inputs as space-delimited strings in the CSV.
-    #  Since we have a [CLS] token, each token is shifted by 1. This doesn't
-    #  matter for the internal representations, since the element names are
-    #  arbitrary. The output is not shifted, the text representation of the
-    #  input and output match [and are equal to the element index in the
-    #  group from which they were generated].
+    # "Tokenize" data by converting inputs back into lists of integers;
+    # allows us to leave the inputs as space-delimited strings in the CSV.
+    # Since we have a [CLS] token, each token is shifted by 1. This doesn't
+    # matter for the internal representations, since the element names are
+    # arbitrary. The output is not shifted, the text representation of the
+    # input and output match [and are equal to the element index in the
+    # group from which they were generated].
     tokenized = [int(t) + len(SPECIALS) for t in str(example["input"]).split()]
     tokenized = [SPECIALS.index("[CLS]")] + tokenized
     return {"input": tokenized, "target": int(example["target"])}
 
 
-def pad_collate(samples: list[dict]) -> dict:
+def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
 
     # Perform channel-wise padding
     channels = samples[0].keys()
@@ -212,7 +261,7 @@ def compute_metrics(metrics: list, prefix: str | None = None) -> dict:
     values_dict = {}
     for metric in metrics:
         simple_name = metric.name.split("/")[-1]
-        if simple_name in ["accuracy", "BucketHeadP65/confusion_matrix"]:
+        if simple_name in ["accuracy", "confusion_matrix"]:
             values_dict[simple_name] = metric.compute()[metric.name]
         elif simple_name in ["precision", "recall"]:
             values_dict[simple_name] = metric.compute(
@@ -243,6 +292,7 @@ def main(
     layer_norm_eps: float = 1e-5,
     norm_first: bool = False,
     num_layers: int = 6,
+    weight_sharing: bool = False,
     # Training parameters
     epochs: int = 10,
     batch_size: int = 32,
@@ -285,6 +335,7 @@ def main(
         "layer_norm_eps": layer_norm_eps,
         "norm_first": norm_first,
         "num_layers": num_layers,
+        "weight_sharing": weight_sharing,
         "n_vocab": n_vocab,
         "lr": lr,
         "betas": (beta1, beta2),
@@ -308,6 +359,7 @@ def main(
         layer_norm_eps=layer_norm_eps,
         norm_first=norm_first,
         num_layers=num_layers,
+        weight_sharing=weight_sharing,
         n_vocab=n_vocab,
     )
 

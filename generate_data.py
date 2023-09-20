@@ -81,12 +81,14 @@ def main(
         if samples > num_unique_sequences:
             print(
                 f"Warning: {samples} > {num_unique_sequences}. I will only"
-                "generate {num_elements} examples."
+                f"generate {num_unique_sequences} examples."
             )
             samples = num_elements
         print(f"Randomly sampling {samples} sequences.")
-        sequences = product(range(num_elements), repeat=k)
-        sequences = random.sample(list(sequences), k=samples)
+        sequences = set()
+        while len(sequences) < samples:
+            sequences.add(tuple(random.choices(range(num_elements), k=k)))
+        sequences = list(sequences)
 
     examples = []
     for seq in sequences:
