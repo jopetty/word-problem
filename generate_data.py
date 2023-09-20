@@ -42,14 +42,15 @@ def generate_group(g: (str, int)) -> FiniteAlgebra:
 
 
 def main(
-    num_examples: int | None = None,
-    seq_length: int | list[int] = 10,
     group: str = "S5",
+    seq_length: int | list[int] = 10,
+    num_examples: int | None = None,
     data_dir: str | Path = PROJECT_ROOT / "data",
     seed: int = random.randint(0, 1_000_000),
 ):
 
     random.seed(seed)
+    print(f"Using seed {seed}")
 
     group_ids = [(g[0], int(g[1:])) for g in group.split("_x_")]
     for g in group_ids:
@@ -58,6 +59,7 @@ def main(
     group_prod = reduce(lambda x, y: x * y, group_list)
 
     num_elements = len(group_prod.elements)
+    num_unique_sequences = num_elements**seq_length
 
     if num_examples is None:
         print(
@@ -69,17 +71,15 @@ def main(
         sequences = product(range(num_elements), repeat=seq_length)
 
     else:
-        if num_examples > num_elements:
+        if num_examples > num_unique_sequences:
             print(
-                f"Warning: {num_examples} > {num_elements}. I will only"
+                f"Warning: {num_examples} > {num_unique_sequences}. I will only"
                 "generate {num_elements} examples."
             )
             num_examples = num_elements
-        print(
-            f"Randomly sampling {num_examples}/{num_elements ** seq_length} sequences."
-        )
+        print(f"Randomly sampling {num_examples} sequences.")
         sequences = product(range(num_elements), repeat=seq_length)
-        sequences = random.choices(list(sequences), k=num_examples)
+        sequences = random.sample(list(sequences), k=num_examples)
 
     examples = []
     for seq in sequences:
