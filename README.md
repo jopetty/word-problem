@@ -14,9 +14,11 @@ conda env create && conda activate depth
 
 To train a model, run `python depth_test.py`. Command-line arguments to configure the training run are the arguments to the `main` function, which is the most accurate documentation for what to do. Some important ones:
 
-- `data`: the name of the file in the `data/` directory, without the `.csv` extension.
-- `num_layers`: how many layers in the transformer encoder.
-- `epochs`: the number of epochs to train for.
+- `--group`: the name of the file in the `data/` directory, without the `.csv` extension.
+- `--num_layers`: how many layers in the transformer encoder.
+- `--epochs`: the number of epochs to train for.
+
+You must include exactly one of `--k` or `--max_len`. These values specify how long the sequences of the dataset are in terms of the number of elements multiplied together. If `--k` is passed, sequences will be of length 2 or `k`; if `--max_len` is passed, they will be of lengths between 2 and `max_len`. If `k` or `max_len` are greater than 2, the training set will include all sequences of length 2 plus a random subset of the longer sequences; if `k` or `max_len` are equal to 2, the 2-element sequences will be split between the train and validation sets.
 
 ### Data
 
