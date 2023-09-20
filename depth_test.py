@@ -106,15 +106,10 @@ def pad_collate(samples: list[dict]) -> dict:
     channels = samples[0].keys()
     max_lens = {}
     for channel in channels:
-        # print([s[channel].dim() for s in samples])
-        # lens = [s[channel].shape[0] if s[channel].dim() == 1 else 0 for s in samples]
-        # print([len(l) for l in lens])
-        # print([s[channel].shape for s in samples])
         max_lens[channel] = max(
             [s[channel].shape[0] if s[channel].dim() == 1 else 0 for s in samples]
         )
 
-    # print(max_lens)
     for s in samples:
         for channel in channels:
             if max_lens[channel] > 0:
@@ -125,8 +120,6 @@ def pad_collate(samples: list[dict]) -> dict:
     collated = {}
     for channel in channels:
         collated[channel] = torch.stack([s[channel] for s in samples])
-    # print(collated)
-    # raise SystemExit
     return collated
 
 
@@ -168,16 +161,12 @@ def get_dataset(
         )
     else:
         pair_data_path, long_data_paths = data_paths[0], data_paths[1:]
-        print("Pair data path:", pair_data_path)
-        print(type(pair_data_path))
-        # raise SystemExit
         pair_data = (
             load_dataset("csv", data_files=str(pair_data_path), split="all")
             .remove_columns(["length"])
             .map(tokenize)
             .with_format(type="torch")
         )
-        # raise SystemExit
         long_data = [
             (
                 load_dataset("csv", data_files=str(p), split="all")
