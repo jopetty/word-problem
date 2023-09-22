@@ -42,12 +42,20 @@ def generate_group(g: (str, int)) -> FiniteAlgebra:
 
 
 def main(
-    group: str = "S5",
-    seq_length: int | list[int] = 10,
-    num_examples: int | None = None,
+    group: str,
+    k: int | list[int] = 10,
+    samples: int | None = None,
     data_dir: str | Path = PROJECT_ROOT / "data",
     seed: int = random.randint(0, 1_000_000),
+    overwrite: bool = False,
 ):
+
+    data_path = data_dir / f"{group}={k}.csv"
+    if data_path.exists() and not overwrite:
+        print(
+            f"Data already exists at {data_path}. Use `--overwrite` to regenerate file."
+        )
+        return
 
     random.seed(seed)
     print(f"Using seed {seed}")
@@ -59,33 +67,34 @@ def main(
     group_prod = reduce(lambda x, y: x * y, group_list)
 
     num_elements = len(group_prod.elements)
-    num_unique_sequences = num_elements**seq_length
+    num_unique_sequences = num_elements**k
 
-    if num_examples is None:
+    if samples is None:
         print(
-            f"Generating all {num_elements} ^ {seq_length} = "
-            f"{num_elements ** seq_length} sequences."
+            f"Generating all {num_elements} ^ {k} = " f"{num_elements ** k} sequences."
         )
         print("Output data will not be shuffled.")
 
-        sequences = product(range(num_elements), repeat=seq_length)
+        sequences = product(range(num_elements), repeat=k)
 
     else:
-        if num_examples > num_unique_sequences:
+        if samples > num_unique_sequences:
             print(
-                f"Warning: {num_examples} > {num_unique_sequences}. I will only"
-                "generate {num_elements} examples."
+                f"Warning: {samples} > {num_unique_sequences}. I will only"
+                f"generate {num_unique_sequences} examples."
             )
-            num_examples = num_elements
-        print(f"Randomly sampling {num_examples} sequences.")
-        sequences = product(range(num_elements), repeat=seq_length)
-        sequences = random.sample(list(sequences), k=num_examples)
+            samples = num_elements
+        print(f"Randomly sampling {samples} sequences.")
+        sequences = set()
+        while len(sequences) < samples:
+            sequences.add(tuple(random.choices(range(num_elements), k=k)))
+        sequences = list(sequences)
 
     examples = []
     for seq in sequences:
         examples.append(
             {
-                "length": seq_length,
+                "length": k,
                 "input": " ".join(map(str, seq)),
                 "target": str(reduce(partial(group_reduce, G=group_prod), seq)),
             }
@@ -93,7 +102,6 @@ def main(
     ex_df = pl.from_dicts(examples)
     if not os.path.exists(data_dir):
         os.mkdir(data_dir)
-    data_path = data_dir / f"{group_prod.name}={seq_length}.csv"
     print(f"Writing data to `{data_path}`")
     ex_df.write_csv(data_path)
 
