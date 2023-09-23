@@ -49,6 +49,34 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
+class MLPModel(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        dim_feedforward: int,
+        dropout: float,
+        activation: str,
+        n_vocab: int,
+    ):
+        super().__init__()
+        self.embedding = nn.Sequential(
+            nn.Embedding(n_vocab, d_model), PositionalEncoding(d_model, dropout)
+        )
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, dim_feedforward),
+            nn.ReLU() if activation == "relu" else nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, d_model),
+        )
+        self.classifier = nn.Linear(d_model, n_vocab)
+
+    def forward(self, x):
+        x = self.ff(self.embedding(x))
+        x = x[:, 0, :]
+        logits = self.classifier(x)
+        return logits
+
+
 class EncoderModel(nn.Module):
     def __init__(
         self,
@@ -180,7 +208,7 @@ def get_dataset(
     train_size: float,
     data_dir: str | Path,
 ) -> dict:
-    assert train_size > 0 and train_size < 1, "`train_size` must be between 0 and 1"
+    assert train_size > 0 and train_size <= 1, "`train_size` must be in (0,1]"
     print(max_len, k)
 
     if max_len is None:
@@ -195,11 +223,13 @@ def get_dataset(
         if not data_paths[0].exists():
             raise FileNotFoundError(f"You must have data for {group}={2}.")
         data_paths = [p for p in data_paths if p.exists()]
+        data_paths = list(set(data_paths))
         print("Constructing dataset from:")
         print("  " + "\n  ".join(map(str, data_paths)))
     else:
         assert k > 1, "`k` must be at least 2"
         data_paths = [data_dir / f"{group}={i}.csv" for i in [2, k]]
+        data_paths = list(set(data_paths))
         if not data_paths[0].exists():
             raise FileNotFoundError(f"You must have data for {group}={1}.")
         print("Constructing dataset from:")
@@ -222,13 +252,21 @@ def get_dataset(
 
     # Construct dataset
     if len(data_paths) == 1:
-        dataset = (
-            load_dataset("csv", data_files=str(data_paths[0]), split="all")
-            .remove_columns(["length"])
-            .map(tokenize)
-            .with_format(type="torch")
-            .train_test_split(train_size=train_size)
-        )
+        if train_size < 1:
+            dataset = (
+                load_dataset("csv", data_files=str(data_paths[0]), split="all")
+                .remove_columns(["length"])
+                .map(tokenize)
+                .with_format(type="torch")
+                .train_test_split(train_size=train_size)
+            )
+        else:
+            dataset = (
+                load_dataset("csv", data_files=str(data_paths[0]), split="all")
+                .remove_columns(["length"])
+                .map(tokenize)
+                .with_format(type="torch")
+            )
     else:
         pair_data = (
             load_dataset("csv", data_files=str(data_paths[0]), split="all")
@@ -276,14 +314,144 @@ def compute_metrics(metrics: list, prefix: str | None = None) -> dict:
     return values_dict
 
 
-def main(
+def train_mlp(
     # Data parameters
     group: str,
-    data_dir: str | Path = PROJECT_ROOT / "data",
+    data_dir: Path = PROJECT_ROOT / "data",
+    # Model parameters
+    d_model: int = 512,
+    dim_feedforward: int = 2048,
+    activation: str = "relu",
+    dropout: float = 0.1,
+    # Training parameters
+    epochs: int = 10,
+    batch_size: int = 32,
+    lr: float = 1e-4,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    op_eps: float = 1e-8,
+    weight_decay: float = 0.01,
+    # Misc
+    log_level: str = "INFO",
+    seed: int = randint(0, 1_000_000),
+    project_name: str = "word_problems_mlp",
+    logger: bool = True,
+):
+
+    accelerator = Accelerator(log_with="wandb") if logger else Accelerator()
+    log.setLevel(log_level)
+
+    # Load dataset
+    datadict = get_dataset(group, max_len=None, k=2, train_size=1.0, data_dir=data_dir)
+    dataset = datadict["dataset"]
+    n_vocab = datadict["n_vocab"]
+    log.info("Dataset: ", dataset)
+    print(dataset)
+
+    # Set up logger
+    project_hps = {
+        "group": group,
+        "d_model": d_model,
+        "dim_feedforward": dim_feedforward,
+        "activation": activation,
+        "n_vocab": n_vocab,
+        "lr": lr,
+        "betas": (beta1, beta2),
+        "eps": op_eps,
+        "weight_decay": weight_decay,
+        "seed": seed,
+    }
+
+    accelerator.init_trackers(
+        project_name,
+        config=project_hps,
+    )
+
+    model = MLPModel(
+        d_model=d_model,
+        dim_feedforward=dim_feedforward,
+        activation=activation,
+        dropout=dropout,
+        n_vocab=n_vocab,
+    )
+
+    device = accelerator.device
+
+    model = model.to(device)
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=lr,
+        betas=(beta1, beta2),
+        eps=op_eps,
+        weight_decay=weight_decay,
+    )
+    train_dataloader = DataLoader(
+        dataset,
+        shuffle=True,
+        batch_size=batch_size,
+        collate_fn=pad_collate,
+    )
+
+    model, optimizer, train_dataloader = accelerator.prepare(
+        model, optimizer, train_dataloader
+    )
+
+    metrics = [load_metric("accuracy")]
+
+    global_step = 0
+    for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
+        model.train()
+        train_loss = []
+        for batch in (
+            t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
+        ):
+
+            global_step += 1
+            optimizer.zero_grad()
+
+            source = batch["input"]
+            target = batch["target"]
+            output = model(source)
+
+            loss = F.cross_entropy(output, target)
+            train_loss.append(loss.item())
+
+            predictions, references = accelerator.gather_for_metrics((output, target))
+
+            # print("Pred:", predictions.argmax(dim=-1))
+            # print("Target:", references)
+
+            for metric in metrics:
+                metric.add_batch(
+                    predictions=predictions.argmax(dim=-1), references=references
+                )
+            accelerator.backward(loss)
+            optimizer.step()
+
+            t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
+
+        train_metrics = compute_metrics(metrics, prefix="train")
+        train_metrics["train/loss"] = np.mean(train_loss)
+        n_bar.set_postfix(
+            {
+                "loss": f"{train_metrics['train/loss']:.5f}",
+                "acc": f"{train_metrics['train/accuracy']:.5f}",
+            }
+        )
+        accelerator.log(train_metrics, step=global_step)
+        accelerator.log({"epoch": epoch}, step=global_step)
+
+    accelerator.end_training()
+
+
+def train(
+    # Data parameters
+    group: str,
+    data_dir: Path = PROJECT_ROOT / "data",
     max_len: int | None = None,
     k: int | None = None,
     train_split: float = 0.8,
-    # Transformer parameters
+    # Model parameters
     d_model: int = 512,
     nhead: int = 8,
     dim_feedforward: int = 2048,
@@ -302,19 +470,16 @@ def main(
     op_eps: float = 1e-8,
     weight_decay: float = 0.01,
     # Misc
-    mode: str = "train",
     log_level: str = "INFO",
     seed: int = randint(0, 1_000_000),
     project_name: str = "word_problems",
-    use_logger: bool = True,
+    logger: bool = True,
 ):
 
     set_seed(seed)
 
-    accelerator = Accelerator(log_with="wandb") if use_logger else Accelerator()
+    accelerator = Accelerator(log_with="wandb") if logger else Accelerator()
     log.setLevel(log_level)
-
-    assert mode in ["train", "test"], "mode must be either 'train' or 'test'"
 
     # Load dataset
     datadict = get_dataset(group, max_len, k, train_split, data_dir)
@@ -366,107 +531,97 @@ def main(
     log.info("Model: ", model)
     print(model)
 
-    if mode == "train":
-        device = accelerator.device
+    device = accelerator.device
 
-        model = model.to(device)
-        optimizer = optim.AdamW(
-            model.parameters(),
-            lr=lr,
-            betas=(beta1, beta2),
-            eps=op_eps,
-            weight_decay=weight_decay,
-        )
-        train_dataloader = DataLoader(
-            dataset["train"],
-            shuffle=True,
-            batch_size=batch_size,
-            collate_fn=pad_collate,
-        )
-        eval_dataloader = DataLoader(
-            dataset["test"],
-            shuffle=False,
-            batch_size=batch_size,
-            collate_fn=pad_collate,
-        )
+    model = model.to(device)
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=lr,
+        betas=(beta1, beta2),
+        eps=op_eps,
+        weight_decay=weight_decay,
+    )
+    train_dataloader = DataLoader(
+        dataset["train"],
+        shuffle=True,
+        batch_size=batch_size,
+        collate_fn=pad_collate,
+    )
+    eval_dataloader = DataLoader(
+        dataset["test"],
+        shuffle=False,
+        batch_size=batch_size,
+        collate_fn=pad_collate,
+    )
 
-        model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-            model, optimizer, train_dataloader, eval_dataloader
-        )
+    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
+        model, optimizer, train_dataloader, eval_dataloader
+    )
 
-        # Construct metrics
-        metrics = [
-            load_metric("accuracy"),
-            load_metric("precision"),
-            load_metric("recall"),
-            load_metric("f1"),
-            load_metric("BucketHeadP65/confusion_matrix"),
-        ]
+    # Construct metrics
+    metrics = [
+        load_metric("accuracy"),
+        load_metric("precision"),
+        load_metric("recall"),
+        load_metric("f1"),
+        load_metric("BucketHeadP65/confusion_matrix"),
+    ]
 
-        global_step = 0
-        for epoch in (
-            n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)
+    global_step = 0
+    for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
+        model.train()
+        train_loss = []
+        for batch in (
+            t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
         ):
-            model.train()
-            train_loss = []
-            for batch in (
-                t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
-            ):
 
-                global_step += 1
-                optimizer.zero_grad()
+            global_step += 1
+            optimizer.zero_grad()
 
-                source = batch["input"]
-                target = batch["target"]
+            source = batch["input"]
+            target = batch["target"]
+            output = model(source)
+
+            loss = F.cross_entropy(output, target)
+            train_loss.append(loss.item())
+
+            predictions, references = accelerator.gather_for_metrics((output, target))
+
+            for metric in metrics:
+                metric.add_batch(
+                    predictions=predictions.argmax(dim=-1), references=references
+                )
+            accelerator.backward(loss)
+            optimizer.step()
+
+            t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
+
+        train_metrics = compute_metrics(metrics, prefix="train")
+        train_metrics["train/loss"] = np.mean(train_loss)
+        accelerator.log(train_metrics, step=global_step)
+
+        model.eval()
+        for batch in (
+            e_bar := tqdm(eval_dataloader, desc="Eval", position=2, leave=False)
+        ):
+            source = batch["input"]
+            target = batch["target"]
+            with torch.no_grad():
                 output = model(source)
-
-                loss = F.cross_entropy(output, target)
-                train_loss.append(loss.item())
-
-                predictions, references = accelerator.gather_for_metrics(
-                    (output, target)
+            predictions, references = accelerator.gather_for_metrics((output, target))
+            for metric in metrics:
+                metric.add_batch(
+                    predictions=predictions.argmax(dim=-1), references=references
                 )
 
-                for metric in metrics:
-                    metric.add_batch(
-                        predictions=predictions.argmax(dim=-1), references=references
-                    )
-                accelerator.backward(loss)
-                optimizer.step()
+        eval_metrics = compute_metrics(metrics, prefix="val")
+        accelerator.log(eval_metrics, step=global_step)
+        accelerator.log({"epoch": epoch}, step=global_step)
 
-                t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
+        n_bar.set_postfix({"val/acc": eval_metrics["val/accuracy"]})
 
-            train_metrics = compute_metrics(metrics, prefix="train")
-            train_metrics["train/loss"] = np.mean(train_loss)
-            accelerator.log(train_metrics, step=global_step)
-
-            model.eval()
-            for batch in (
-                e_bar := tqdm(eval_dataloader, desc="Eval", position=2, leave=False)
-            ):
-                source = batch["input"]
-                target = batch["target"]
-                with torch.no_grad():
-                    output = model(source)
-                predictions, references = accelerator.gather_for_metrics(
-                    (output, target)
-                )
-                for metric in metrics:
-                    metric.add_batch(
-                        predictions=predictions.argmax(dim=-1), references=references
-                    )
-
-            eval_metrics = compute_metrics(metrics, prefix="val")
-            accelerator.log(eval_metrics, step=global_step)
-            accelerator.log({"epoch": epoch}, step=global_step)
-
-            n_bar.set_postfix({"val/acc": eval_metrics["val/accuracy"]})
-
-        accelerator.end_training()
-
-    else:
-        raise NotImplementedError
+    accelerator.end_training()
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire()
