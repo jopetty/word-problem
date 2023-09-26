@@ -39,6 +39,31 @@ class SpecialTokens(IntEnum):
     PAD = auto()
 
 
+class AvgPool(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x.mean(dim=self.dim)
+
+    def extra_repr(self) -> str:
+        return f"dim={self.dim}"
+
+
+class IndexPool(nn.Module):
+    def __init__(self, dim: int, index: int):
+        super().__init__()
+        self.dim = dim
+        self.index = index
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x.select(dim=self.dim, index=self.index)
+
+    def extra_repr(self) -> str:
+        return f"dim={self.dim}, index={self.index}"
+
+
 def get_activation(activation: str) -> nn.Module:
     if activation == "relu":
         return nn.ReLU()
@@ -90,23 +115,26 @@ class MLPModel(nn.Module):
         activation: str,
         layers: int,
         n_vocab: int,
+        layer_norm_eps: float = 1e-05,
     ):
         super().__init__()
-        self.embedding = nn.Embedding(n_vocab, d_model)
+        self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
         ff_layer = nn.Sequential(
             nn.Linear(d_model, dim_feedforward),
             get_activation(activation),
             nn.Dropout(dropout),
             nn.Linear(dim_feedforward, d_model),
+            nn.LayerNorm(d_model, layer_norm_eps),
         )
         self.ff = nn.ModuleList([ff_layer for _ in range(layers)])
+        self.pool = IndexPool(dim=1, index=0)
         self.classifier = nn.Linear(d_model, n_vocab)
 
     def forward(self, x):
         x = self.embedding(x)
         for ff_layer in self.ff:
             x = ff_layer(x)
-        x = x[:, 0, :]
+        x = self.pool(x)
         logits = self.classifier(x)
         return logits
 
@@ -138,7 +166,7 @@ class EncoderModel(nn.Module):
         )
         self.weight_sharing = weight_sharing
         self.num_layers = num_layers
-        self.embedding = nn.Embedding(n_vocab, d_model)
+        self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
         self.pos_enc = PositionalEncoding(d_model, dropout)
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
 
@@ -179,7 +207,7 @@ class EncoderModel(nn.Module):
                 ].norm2.weight
                 self.encoder.layers[i].norm2.bias = self.encoder.layers[0].norm2.bias
 
-        # raise SystemExit
+        self.pool = IndexPool(dim=1, index=0)
         self.classifier = nn.Linear(d_model, n_vocab)
 
     def forward(self, x):
@@ -192,7 +220,7 @@ class EncoderModel(nn.Module):
 
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
-        x = x[:, 0, :]
+        x = self.pool(x)
         logits = self.classifier(x)
         return logits
 
@@ -207,8 +235,6 @@ def tokenize(example: dict) -> dict:
     # group from which they were generated].
     tokenized = [int(t) + len(SpecialTokens) for t in str(example["input"]).split()]
     tokenized = [SpecialTokens.CLS.value] + tokenized
-
-    print(list(SpecialTokens))
 
     return {"input": tokenized, "target": int(example["target"])}
 
@@ -247,11 +273,8 @@ def get_dataset(
 ) -> dict:
     assert train_size > 0 and train_size <= 1, "`train_size` must be in (0,1]"
 
-    if max_len is None:
-        assert k is not None, "You must provide either `max_len` or `k`"
-    else:
-        assert max_len is not None, "You must provide either `max_len` or `k`"
-        assert k is None, "You must provide either `max_len` or `k`"
+    if not ((k is None) ^ (max_len is None)):
+        raise ValueError("You must provide exactly one of `max_len` or `k`")
 
     if max_len is not None:
         assert max_len > 1, "`max_len` must be at least 2"
@@ -288,21 +311,14 @@ def get_dataset(
 
     # Construct dataset
     if len(data_paths) == 1:
+        dataset = (
+            load_dataset("csv", data_files=str(data_paths[0]), split="all")
+            .remove_columns(["length"])
+            .map(tokenize)
+            .with_format(type="torch")
+        )
         if train_size < 1:
-            dataset = (
-                load_dataset("csv", data_files=str(data_paths[0]), split="all")
-                .remove_columns(["length"])
-                .map(tokenize)
-                .with_format(type="torch")
-                .train_test_split(train_size=train_size)
-            )
-        else:
-            dataset = (
-                load_dataset("csv", data_files=str(data_paths[0]), split="all")
-                .remove_columns(["length"])
-                .map(tokenize)
-                .with_format(type="torch")
-            )
+            dataset = dataset.train_test_split(train_size=train_size)
     else:
         pair_data = (
             load_dataset("csv", data_files=str(data_paths[0]), split="all")
@@ -372,10 +388,10 @@ def train_mlp(
     log_level: str = "INFO",
     seed: int = randint(0, 1_000_000),
     project_name: str = "word_problems_mlp",
-    logger: bool = True,
+    logging: bool = True,
 ):
 
-    accelerator = Accelerator(log_with="wandb") if logger else Accelerator()
+    accelerator = Accelerator(log_with="wandb") if logging else Accelerator()
     log.setLevel(log_level)
 
     # Load dataset
@@ -390,8 +406,11 @@ def train_mlp(
         "d_model": d_model,
         "dim_feedforward": dim_feedforward,
         "activation": activation,
+        "dropout": dropout,
         "layers": layers,
         "n_vocab": n_vocab,
+        "epochs": epochs,
+        "batch_size": batch_size,
         "lr": lr,
         "betas": (beta1, beta2),
         "eps": op_eps,
@@ -458,6 +477,9 @@ def train_mlp(
 
             predictions, references = accelerator.gather_for_metrics((output, target))
 
+            # log.debug(f"Predictions: {predictions.argmax(dim=-1)}")
+            # log.debug(f"References: {references}")
+
             for metric in metrics:
                 metric.add_batch(
                     predictions=predictions.argmax(dim=-1), references=references
@@ -478,6 +500,7 @@ def train_mlp(
         accelerator.log(train_metrics, step=global_step)
         accelerator.log({"epoch": epoch}, step=global_step)
 
+    log.info(train_metrics)
     accelerator.end_training()
 
 
@@ -510,20 +533,19 @@ def train(
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
     project_name: str = "word_problems",
-    logger: bool = True,
+    logging: bool = True,
 ):
 
     set_seed(seed)
 
-    accelerator = Accelerator(log_with="wandb") if logger else Accelerator()
+    accelerator = Accelerator(log_with="wandb") if logging else Accelerator()
     log.setLevel(log_level)
 
     # Load dataset
     datadict = get_dataset(group, max_len, k, train_split, data_dir)
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
-    log.info("Dataset: ", dataset)
-    print(dataset)
+    log.info(f"Dataset: {dataset}")
 
     # Set up logger
     project_hps = {
@@ -539,12 +561,15 @@ def train(
         "num_layers": num_layers,
         "weight_sharing": weight_sharing,
         "n_vocab": n_vocab,
+        "epochs": epochs,
+        "batch_size": batch_size,
         "lr": lr,
         "betas": (beta1, beta2),
         "eps": op_eps,
         "weight_decay": weight_decay,
         "seed": seed,
     }
+    log.info(f"Config: {pformat(project_hps)}")
 
     accelerator.init_trackers(
         project_name,
@@ -565,8 +590,8 @@ def train(
         n_vocab=n_vocab,
     )
 
-    log.info("Model: ", model)
-    print(model)
+    log.info(f"Model: {model}")
+    log.info(f"Accelerator state: {accelerator.state}")
 
     device = accelerator.device
 
@@ -578,18 +603,32 @@ def train(
         eps=op_eps,
         weight_decay=weight_decay,
     )
-    train_dataloader = DataLoader(
-        dataset["train"],
-        shuffle=True,
-        batch_size=batch_size,
-        collate_fn=pad_collate,
-    )
-    eval_dataloader = DataLoader(
-        dataset["test"],
-        shuffle=False,
-        batch_size=batch_size,
-        collate_fn=pad_collate,
-    )
+    if train_split < 1:
+        train_dataloader = DataLoader(
+            dataset["train"],
+            shuffle=True,
+            batch_size=batch_size,
+            collate_fn=pad_collate,
+        )
+        eval_dataloader = DataLoader(
+            dataset["test"],
+            shuffle=False,
+            batch_size=batch_size,
+            collate_fn=pad_collate,
+        )
+    else:
+        train_dataloader = DataLoader(
+            dataset,
+            shuffle=True,
+            batch_size=batch_size,
+            collate_fn=pad_collate,
+        )
+        eval_dataloader = DataLoader(
+            dataset,
+            shuffle=True,
+            batch_size=batch_size,
+            collate_fn=pad_collate,
+        )
 
     model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
         model, optimizer, train_dataloader, eval_dataloader
@@ -657,6 +696,7 @@ def train(
 
         n_bar.set_postfix({"val/acc": eval_metrics["val/accuracy"]})
 
+    log.info(eval_metrics)
     accelerator.end_training()
 
 
