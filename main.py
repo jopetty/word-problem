@@ -113,27 +113,29 @@ class MLPModel(nn.Module):
         dim_feedforward: int,
         dropout: float,
         activation: str,
-        layers: int,
+        num_layers: int,
         n_vocab: int,
         layer_norm_eps: float = 1e-05,
     ):
         super().__init__()
         self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
-        ff_layer = nn.Sequential(
-            nn.Linear(d_model, dim_feedforward),
-            get_activation(activation),
-            nn.Dropout(dropout),
-            nn.Linear(dim_feedforward, d_model),
-            nn.LayerNorm(d_model, layer_norm_eps),
-        )
-        self.ff = nn.ModuleList([ff_layer for _ in range(layers)])
+        self.ff = nn.Sequential()
+        for _ in range(num_layers):
+            self.ff.append(
+                nn.Sequential(
+                    nn.Linear(d_model, dim_feedforward),
+                    get_activation(activation),
+                    nn.Dropout(dropout),
+                    nn.Linear(dim_feedforward, d_model),
+                    nn.LayerNorm(d_model, layer_norm_eps),
+                )
+            )
         self.pool = IndexPool(dim=1, index=0)
         self.classifier = nn.Linear(d_model, n_vocab)
 
     def forward(self, x):
         x = self.embedding(x)
-        for ff_layer in self.ff:
-            x = ff_layer(x)
+        x = self.ff(x)
         x = self.pool(x)
         logits = self.classifier(x)
         return logits
@@ -173,16 +175,21 @@ class EncoderModel(nn.Module):
         self.classifier = nn.Linear(d_model, n_vocab)
 
         if weight_sharing:
-            self.encoder = nn.Sequential(*[layer for _ in range(num_layers)])
-        else:
-            self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
+            # `nn.Module`s are reference types, so we can just repeat the same
+            # `layer` object to achieve weight sharing. See the internal
+            # implementation of `nn.TransformerEncoder` to see how this is
+            # _not_ done by default via `copy.deepcopy`.
+            self.encoder.layers = nn.ModuleList([layer] * num_layers)
 
     def forward(self, x):
 
         if self.weight_sharing:
-            assert self.encoder[0] == self.encoder[1], "Weights not shared!"
             assert (
-                self.encoder[0].linear1.weight is self.encoder[1].linear1.weight
+                self.encoder.layers[0] == self.encoder.layers[1]
+            ), "Weights not shared!"
+            assert (
+                self.encoder.layers[0].linear1.weight
+                is self.encoder.layers[1].linear1.weight
             ), "Weights not shared!"
 
         x = self.pos_enc(self.embedding(x))
@@ -342,7 +349,7 @@ def train_mlp(
     dim_feedforward: int = 2048,
     activation: str = "relu",
     dropout: float = 0.1,
-    layers: int = 1,
+    num_layers: int = 1,
     # Training parameters
     epochs: int = 10,
     batch_size: int = 32,
@@ -374,7 +381,7 @@ def train_mlp(
         "dim_feedforward": dim_feedforward,
         "activation": activation,
         "dropout": dropout,
-        "layers": layers,
+        "num_layers": num_layers,
         "n_vocab": n_vocab,
         "epochs": epochs,
         "batch_size": batch_size,
@@ -396,7 +403,7 @@ def train_mlp(
         dim_feedforward=dim_feedforward,
         activation=activation,
         dropout=dropout,
-        layers=layers,
+        num_layers=num_layers,
         n_vocab=n_vocab,
     )
     log.info(f"Model: {model}")
