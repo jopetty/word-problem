@@ -115,27 +115,46 @@ class MLPModel(nn.Module):
         activation: str,
         num_layers: int,
         n_vocab: int,
+        weight_sharing: bool = False,
         layer_norm_eps: float = 1e-05,
     ):
         super().__init__()
         self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
-        self.ff = nn.Sequential()
-        for _ in range(num_layers):
-            self.ff.append(
-                nn.Sequential(
-                    nn.Linear(d_model, dim_feedforward),
-                    get_activation(activation),
-                    nn.Dropout(dropout),
-                    nn.Linear(dim_feedforward, d_model),
-                    nn.LayerNorm(d_model, layer_norm_eps),
-                )
+        self.ff = nn.ModuleList()
+        self.weight_sharing = weight_sharing
+        if self.weight_sharing:
+            ff_layer = nn.Sequential(
+                nn.Linear(d_model, dim_feedforward),
+                get_activation(activation),
+                nn.Dropout(dropout),
+                nn.Linear(dim_feedforward, d_model),
+                nn.LayerNorm(d_model, layer_norm_eps),
             )
+            for _ in range(num_layers):
+                self.ff.append(ff_layer)
+        else:
+            for _ in range(num_layers):
+                self.ff.append(
+                    nn.Sequential(
+                        nn.Linear(d_model, dim_feedforward),
+                        get_activation(activation),
+                        nn.Dropout(dropout),
+                        nn.Linear(dim_feedforward, d_model),
+                        nn.LayerNorm(d_model, layer_norm_eps),
+                    )
+                )
         self.pool = IndexPool(dim=1, index=0)
         self.classifier = nn.Linear(d_model, n_vocab)
 
     def forward(self, x):
+
+        if self.weight_sharing:
+            assert self.ff[0] == self.ff[-1], "Weights not shared!"
+            assert self.ff[0][0].weight is self.ff[-1][0].weight, "Weights not shared!"
+
         x = self.embedding(x)
-        x = self.ff(x)
+        for ff in self.ff:
+            x = ff(x)
         x = self.pool(x)
         logits = self.classifier(x)
         return logits
@@ -185,11 +204,11 @@ class EncoderModel(nn.Module):
 
         if self.weight_sharing:
             assert (
-                self.encoder.layers[0] == self.encoder.layers[1]
+                self.encoder.layers[0] == self.encoder.layers[-1]
             ), "Weights not shared!"
             assert (
                 self.encoder.layers[0].linear1.weight
-                is self.encoder.layers[1].linear1.weight
+                is self.encoder.layers[-1].linear1.weight
             ), "Weights not shared!"
 
         x = self.pos_enc(self.embedding(x))
@@ -200,9 +219,10 @@ class EncoderModel(nn.Module):
 
 
 def tokenize(example: dict) -> dict:
-    # "Tokenize" data by converting inputs back into lists of integers;
+    # Tokenize data by converting inputs back into lists of integers; this
     # allows us to leave the inputs as space-delimited strings in the CSV.
-    # Since we have a [CLS] token, each token is shifted by 1. This doesn't
+    # Since we have special tokens ([CLS], [PAD], etc.) we need to shift
+    # each token by the number of special tokens. This doesn't
     # matter for the internal representations, since the element names are
     # arbitrary. The output is not shifted, the text representation of the
     # input and output match [and are equal to the element index in the
@@ -350,6 +370,7 @@ def train_mlp(
     activation: str = "relu",
     dropout: float = 0.1,
     num_layers: int = 1,
+    weight_sharing: bool = False,
     # Training parameters
     epochs: int = 10,
     batch_size: int = 32,
@@ -382,6 +403,7 @@ def train_mlp(
         "activation": activation,
         "dropout": dropout,
         "num_layers": num_layers,
+        "weight_sharing": weight_sharing,
         "n_vocab": n_vocab,
         "epochs": epochs,
         "batch_size": batch_size,
@@ -404,6 +426,7 @@ def train_mlp(
         activation=activation,
         dropout=dropout,
         num_layers=num_layers,
+        weight_sharing=weight_sharing,
         n_vocab=n_vocab,
     )
     log.info(f"Model: {model}")
