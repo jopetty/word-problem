@@ -1,5 +1,7 @@
+import logging
 from enum import IntEnum, auto
 from pathlib import Path
+from pprint import pformat
 from random import randint
 
 import fire
@@ -18,7 +20,12 @@ from torch import Tensor, nn, optim
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-log = get_logger(__name__, log_level="INFO")
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    datefmt="%Y-%d-%m %H:%M:%S",
+    level=logging.INFO,
+)
+log = get_logger(__name__)
 
 PROJECT_ROOT = path = pyrootutils.find_root(
     search_from=__file__, indicator=".project-root"
@@ -85,7 +92,7 @@ class MLPModel(nn.Module):
         n_vocab: int,
     ):
         super().__init__()
-        self.embedding = nn.Sequential(nn.Embedding(n_vocab, d_model))
+        self.embedding = nn.Embedding(n_vocab, d_model)
         ff_layer = nn.Sequential(
             nn.Linear(d_model, dim_feedforward),
             get_activation(activation),
@@ -239,7 +246,6 @@ def get_dataset(
     data_dir: str | Path,
 ) -> dict:
     assert train_size > 0 and train_size <= 1, "`train_size` must be in (0,1]"
-    print(max_len, k)
 
     if max_len is None:
         assert k is not None, "You must provide either `max_len` or `k`"
@@ -254,16 +260,16 @@ def get_dataset(
             raise FileNotFoundError(f"You must have data for {group}={2}.")
         data_paths = [p for p in data_paths if p.exists()]
         data_paths = list(set(data_paths))
-        print("Constructing dataset from:")
-        print("  " + "\n  ".join(map(str, data_paths)))
+        log.info("Constructing dataset from:")
+        log.info("  " + "\n  ".join(map(str, data_paths)))
     else:
         assert k > 1, "`k` must be at least 2"
         data_paths = [data_dir / f"{group}={i}.csv" for i in [2, k]]
         data_paths = list(set(data_paths))
         if not data_paths[0].exists():
             raise FileNotFoundError(f"You must have data for {group}={1}.")
-        print("Constructing dataset from:")
-        print("  " + "\n  ".join(map(str, data_paths)))
+        log.info("Constructing dataset from:")
+        log.info("  " + "\n  ".join(map(str, data_paths)))
 
     # We can find n_vocab just by looking at the k=2 data, since this is
     # guaranteed to contain all the elements in the group.
@@ -353,7 +359,7 @@ def train_mlp(
     dim_feedforward: int = 2048,
     activation: str = "relu",
     dropout: float = 0.1,
-    layers: int = 2,
+    layers: int = 1,
     # Training parameters
     epochs: int = 10,
     batch_size: int = 32,
@@ -376,8 +382,7 @@ def train_mlp(
     datadict = get_dataset(group, max_len=None, k=2, train_size=1.0, data_dir=data_dir)
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
-    log.info("Dataset: ", dataset)
-    print(dataset)
+    log.info(f"Dataset: {dataset}")
 
     # Set up logger
     project_hps = {
@@ -393,6 +398,7 @@ def train_mlp(
         "weight_decay": weight_decay,
         "seed": seed,
     }
+    log.info(f"Config: {pformat(project_hps)}")
 
     accelerator.init_trackers(
         project_name,
@@ -407,10 +413,10 @@ def train_mlp(
         layers=layers,
         n_vocab=n_vocab,
     )
-    print(model)
+    log.info(f"Model: {model}")
+    log.info(f"Accelerator state: {accelerator.state}")
 
     device = accelerator.device
-
     model = model.to(device)
     optimizer = optim.AdamW(
         model.parameters(),
@@ -451,9 +457,6 @@ def train_mlp(
             train_loss.append(loss.item())
 
             predictions, references = accelerator.gather_for_metrics((output, target))
-
-            # print("Pred:", predictions.argmax(dim=-1))
-            # print("Target:", references)
 
             for metric in metrics:
                 metric.add_batch(
