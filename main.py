@@ -169,54 +169,21 @@ class EncoderModel(nn.Module):
         self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
         self.pos_enc = PositionalEncoding(d_model, dropout)
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
-
-        if weight_sharing:
-            if num_layers == 1:
-                print("Weight sharing has no effect for single-layer models.")
-            for i in range(1, num_layers):
-                self.encoder.layers[i].self_attn.in_proj_weight = self.encoder.layers[
-                    0
-                ].self_attn.in_proj_weight
-                self.encoder.layers[i].self_attn.in_proj_bias = self.encoder.layers[
-                    0
-                ].self_attn.in_proj_bias
-                self.encoder.layers[i].self_attn.out_proj.weight = self.encoder.layers[
-                    0
-                ].self_attn.out_proj.weight
-                self.encoder.layers[i].self_attn.out_proj.bias = self.encoder.layers[
-                    0
-                ].self_attn.out_proj.bias
-                self.encoder.layers[i].linear1.weight = self.encoder.layers[
-                    0
-                ].linear1.weight
-                self.encoder.layers[i].linear1.bias = self.encoder.layers[
-                    0
-                ].linear1.bias
-                self.encoder.layers[i].linear2.weight = self.encoder.layers[
-                    0
-                ].linear2.weight
-                self.encoder.layers[i].linear2.bias = self.encoder.layers[
-                    0
-                ].linear2.bias
-                self.encoder.layers[i].norm1.weight = self.encoder.layers[
-                    0
-                ].norm1.weight
-                self.encoder.layers[i].norm1.bias = self.encoder.layers[0].norm1.bias
-                self.encoder.layers[i].norm2.weight = self.encoder.layers[
-                    0
-                ].norm2.weight
-                self.encoder.layers[i].norm2.bias = self.encoder.layers[0].norm2.bias
-
         self.pool = IndexPool(dim=1, index=0)
         self.classifier = nn.Linear(d_model, n_vocab)
+
+        if weight_sharing:
+            self.encoder = nn.Sequential(*[layer for _ in range(num_layers)])
+        else:
+            self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
 
     def forward(self, x):
 
         if self.weight_sharing:
-            assert torch.equal(
-                self.encoder.layers[self.num_layers - 1].linear1.weight,
-                self.encoder.layers[0].linear1.weight,
-            ), "Weights not tied!"
+            assert self.encoder[0] == self.encoder[1], "Weights not shared!"
+            assert (
+                self.encoder[0].linear1.weight is self.encoder[1].linear1.weight
+            ), "Weights not shared!"
 
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
@@ -477,8 +444,9 @@ def train_mlp(
 
             predictions, references = accelerator.gather_for_metrics((output, target))
 
-            # log.debug(f"Predictions: {predictions.argmax(dim=-1)}")
-            # log.debug(f"References: {references}")
+            log.debug(f"Inputs: {source}")
+            log.debug(f"Predictions: {predictions.argmax(dim=-1)}")
+            log.debug(f"References: {references}")
 
             for metric in metrics:
                 metric.add_batch(
