@@ -1,3 +1,4 @@
+from enum import IntEnum, auto
 from pathlib import Path
 from random import randint
 
@@ -25,7 +26,31 @@ PROJECT_ROOT = path = pyrootutils.find_root(
 
 load_dotenv()
 
-SPECIALS = ["[PAD]", "[CLS]"]
+
+class SpecialTokens(IntEnum):
+    CLS = 0
+    PAD = auto()
+
+
+def get_activation(activation: str) -> nn.Module:
+    if activation == "relu":
+        return nn.ReLU()
+    elif activation == "gelu":
+        return nn.GELU()
+    elif activation == "tanh":
+        return nn.Tanh()
+    elif activation == "sigmoid":
+        return nn.Sigmoid()
+    elif activation == "relu6":
+        return nn.ReLU6()
+    elif activation == "elu":
+        return nn.ELU()
+    elif activation == "selu":
+        return nn.SELU()
+    elif activation == "leaky_relu":
+        return nn.LeakyReLU()
+    else:
+        raise ValueError(f"Unknown activation: {activation}")
 
 
 class PositionalEncoding(nn.Module):
@@ -56,22 +81,24 @@ class MLPModel(nn.Module):
         dim_feedforward: int,
         dropout: float,
         activation: str,
+        layers: int,
         n_vocab: int,
     ):
         super().__init__()
-        self.embedding = nn.Sequential(
-            nn.Embedding(n_vocab, d_model), PositionalEncoding(d_model, dropout)
-        )
-        self.ff = nn.Sequential(
+        self.embedding = nn.Sequential(nn.Embedding(n_vocab, d_model))
+        ff_layer = nn.Sequential(
             nn.Linear(d_model, dim_feedforward),
-            nn.ReLU() if activation == "relu" else nn.GELU(),
+            get_activation(activation),
             nn.Dropout(dropout),
             nn.Linear(dim_feedforward, d_model),
         )
+        self.ff = nn.ModuleList([ff_layer for _ in range(layers)])
         self.classifier = nn.Linear(d_model, n_vocab)
 
     def forward(self, x):
-        x = self.ff(self.embedding(x))
+        x = self.embedding(x)
+        for ff_layer in self.ff:
+            x = ff_layer(x)
         x = x[:, 0, :]
         logits = self.classifier(x)
         return logits
@@ -171,8 +198,11 @@ def tokenize(example: dict) -> dict:
     # arbitrary. The output is not shifted, the text representation of the
     # input and output match [and are equal to the element index in the
     # group from which they were generated].
-    tokenized = [int(t) + len(SPECIALS) for t in str(example["input"]).split()]
-    tokenized = [SPECIALS.index("[CLS]")] + tokenized
+    tokenized = [int(t) + len(SpecialTokens) for t in str(example["input"]).split()]
+    tokenized = [SpecialTokens.CLS.value] + tokenized
+
+    print(list(SpecialTokens))
+
     return {"input": tokenized, "target": int(example["target"])}
 
 
@@ -192,7 +222,7 @@ def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
                 s[channel] = F.pad(
                     s[channel],
                     (0, max_lens[channel] - s[channel].shape[0]),
-                    value=SPECIALS.index("[PAD]"),
+                    value=SpecialTokens.PAD.value,
                 )
 
     collated = {}
@@ -323,6 +353,7 @@ def train_mlp(
     dim_feedforward: int = 2048,
     activation: str = "relu",
     dropout: float = 0.1,
+    layers: int = 2,
     # Training parameters
     epochs: int = 10,
     batch_size: int = 32,
@@ -354,6 +385,7 @@ def train_mlp(
         "d_model": d_model,
         "dim_feedforward": dim_feedforward,
         "activation": activation,
+        "layers": layers,
         "n_vocab": n_vocab,
         "lr": lr,
         "betas": (beta1, beta2),
@@ -372,8 +404,10 @@ def train_mlp(
         dim_feedforward=dim_feedforward,
         activation=activation,
         dropout=dropout,
+        layers=layers,
         n_vocab=n_vocab,
     )
+    print(model)
 
     device = accelerator.device
 
@@ -471,7 +505,7 @@ def train(
     weight_decay: float = 0.01,
     # Misc
     log_level: str = "INFO",
-    seed: int = randint(0, 1_000_000),
+    seed: int = randint(0, 2**32 - 1),
     project_name: str = "word_problems",
     logger: bool = True,
 ):
