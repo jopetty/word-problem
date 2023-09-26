@@ -37,7 +37,8 @@ The combination of `group` and `k`/`max_len` determines which data files to use.
 As a sanity check for what a single-layer should be able to compute, we can train a MLP to learn binary multiplication. We don't train with a train/test split since we are only concerned with whether or not a single layer can learn the function, not how well it generalizes. The only required argument is `--group`.
 
 ```bash
-python main.py train_mlp --group <group>
+# Train a single-layer MLP on binary multiplication in Z60
+python main.py train_mlp --group Z60
 ```
 
 ### Data
