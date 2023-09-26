@@ -14,7 +14,7 @@ conda env create && conda activate depth
 
 ### Training
 
-To train a model, run `python depth_test.py`. Command-line arguments to configure the training run are the arguments to the `main` function, which is the most accurate documentation for what to do. Some important ones:
+To train a model, run `python main.py train`. Command-line arguments to configure the training run are the arguments to the `main` function, which is the most accurate documentation for what to do. Some important ones:
 
 - `--group`: the name of the group to train on.
 - `--num_layers`: how many layers in the transformer encoder.
@@ -22,7 +22,23 @@ To train a model, run `python depth_test.py`. Command-line arguments to configur
 
 You must include exactly one of `--k` or `--max_len`. These values specify how long the sequences of the dataset are in terms of the number of elements multiplied together. If `--k` is passed, sequences will be of length 2 or `k`; if `--max_len` is passed, they will be of lengths between 2 and `max_len`. If `k` or `max_len` are greater than 2, the training set will include all sequences of length 2 plus a random subset of the longer sequences; if `k` or `max_len` are equal to 2, the 2-element sequences will be split between the train and validation sets.
 
-The combination of `group` and `k`/`max_len` determines which data files to use. Data files are stored in the `data/` directory and have the name `group=k.csv`.
+```bash
+# Trains a model on all sequences of length 2 & <k> on data from <group>
+python main.py train --group <group> --k <k>
+
+# Trains a model on all sequences of length 2 through <max_len> on data from <group>
+python main.py train --group <group> --max_len <max_len>
+```
+
+The combination of `group` and `k`/`max_len` determines which data files to use. Data files are stored by default in the `data/` directory and have the name `group=k.csv`.
+
+### Training MLP Baselines
+
+As a sanity check for what a single-layer should be able to compute, we can train a MLP to learn binary multiplication. We don't train with a train/test split since we are only concerned with whether or not a single layer can learn the function, not how well it generalizes. The only required argument is `--group`.
+
+```bash
+python main.py train_mlp --group <group>
+```
 
 ### Data
 
