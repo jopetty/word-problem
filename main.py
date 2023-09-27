@@ -1,3 +1,4 @@
+import copy
 import logging
 from enum import IntEnum, auto
 from pathlib import Path
@@ -119,38 +120,31 @@ class MLPModel(nn.Module):
         layer_norm_eps: float = 1e-05,
     ):
         super().__init__()
-        self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
-        self.ff = nn.ModuleList()
+        ff_layer = nn.Sequential(
+            nn.Linear(d_model, dim_feedforward),
+            get_activation(activation),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, d_model),
+            nn.LayerNorm(d_model, layer_norm_eps),
+        )
         self.weight_sharing = weight_sharing
-        if self.weight_sharing:
-            ff_layer = nn.Sequential(
-                nn.Linear(d_model, dim_feedforward),
-                get_activation(activation),
-                nn.Dropout(dropout),
-                nn.Linear(dim_feedforward, d_model),
-                nn.LayerNorm(d_model, layer_norm_eps),
-            )
-            for _ in range(num_layers):
-                self.ff.append(ff_layer)
-        else:
-            for _ in range(num_layers):
-                self.ff.append(
-                    nn.Sequential(
-                        nn.Linear(d_model, dim_feedforward),
-                        get_activation(activation),
-                        nn.Dropout(dropout),
-                        nn.Linear(dim_feedforward, d_model),
-                        nn.LayerNorm(d_model, layer_norm_eps),
-                    )
-                )
+        self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
         self.pool = IndexPool(dim=1, index=0)
         self.classifier = nn.Linear(d_model, n_vocab)
+
+        if self.weight_sharing:
+            self.ff = nn.ModuleList([ff_layer] * num_layers)
+        else:
+            self.ff = nn.ModuleList(
+                [copy.deepcopy(ff_layer) for _ in range(num_layers)]
+            )
 
     def forward(self, x):
 
         if self.weight_sharing:
             assert self.ff[0] == self.ff[-1], "Weights not shared!"
-            assert self.ff[0][0].weight is self.ff[-1][0].weight, "Weights not shared!"
+        else:
+            assert self.ff[0] != self.ff[-1], "Weights shared!"
 
         x = self.embedding(x)
         for ff in self.ff:
@@ -206,10 +200,8 @@ class EncoderModel(nn.Module):
             assert (
                 self.encoder.layers[0] == self.encoder.layers[-1]
             ), "Weights not shared!"
-            assert (
-                self.encoder.layers[0].linear1.weight
-                is self.encoder.layers[-1].linear1.weight
-            ), "Weights not shared!"
+        else:
+            assert self.encoder.layers[0] != self.encoder.layers[-1], "Weights shared!"
 
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
