@@ -116,8 +116,9 @@ class MLPModel(nn.Module):
         activation: str,
         num_layers: int,
         n_vocab: int,
-        weight_sharing: bool = False,
-        layer_norm_eps: float = 1e-05,
+        weight_scale: float,
+        weight_sharing: bool,
+        layer_norm_eps: float,
     ):
         super().__init__()
         ff_layer = nn.Sequential(
@@ -138,6 +139,9 @@ class MLPModel(nn.Module):
             self.ff = nn.ModuleList(
                 [copy.deepcopy(ff_layer) for _ in range(num_layers)]
             )
+
+        for _, p in self.named_parameters():
+            p = weight_scale * p
 
     def forward(self, x):
 
@@ -167,6 +171,7 @@ class EncoderModel(nn.Module):
         num_layers: int,
         weight_sharing: bool,
         n_vocab: int,
+        weight_scale: float,
     ):
         super().__init__()
         layer = nn.TransformerEncoderLayer(
@@ -193,6 +198,9 @@ class EncoderModel(nn.Module):
             # implementation of `nn.TransformerEncoder` to see how this is
             # _not_ done by default via `copy.deepcopy`.
             self.encoder.layers = nn.ModuleList([layer] * num_layers)
+
+        for _, p in self.named_parameters():
+            p = weight_scale * p
 
     def forward(self, x):
 
@@ -276,7 +284,7 @@ def get_dataset(
         data_paths = [data_dir / f"{group}={i}.csv" for i in [2, k]]
         data_paths = list(set(data_paths))
         if not data_paths[0].exists():
-            raise FileNotFoundError(f"You must have data for {group}={1}.")
+            raise FileNotFoundError(f"You must have data for {group}={2}.")
         log.info("Constructing dataset from:")
         log.info("  " + "\n  ".join(map(str, data_paths)))
 
@@ -363,6 +371,8 @@ def train_mlp(
     dropout: float = 0.1,
     num_layers: int = 6,
     weight_sharing: bool = False,
+    weight_scale: float = 1.0,
+    layer_norm_eps: float = 1e-05,
     # Training parameters
     epochs: int = 500,
     batch_size: int = 32,
@@ -396,6 +406,8 @@ def train_mlp(
         "dropout": dropout,
         "num_layers": num_layers,
         "weight_sharing": weight_sharing,
+        "weight_scale": weight_scale,
+        "layer_norm_eps": layer_norm_eps,
         "n_vocab": n_vocab,
         "epochs": epochs,
         "batch_size": batch_size,
@@ -419,6 +431,8 @@ def train_mlp(
         dropout=dropout,
         num_layers=num_layers,
         weight_sharing=weight_sharing,
+        weight_scale=weight_scale,
+        layer_norm_eps=layer_norm_eps,
         n_vocab=n_vocab,
     )
     log.info(f"Model: {model}")
@@ -511,6 +525,7 @@ def train(
     norm_first: bool = False,
     num_layers: int = 6,
     weight_sharing: bool = False,
+    weight_scale: float = 1.0,
     # Training parameters
     epochs: int = 500,
     batch_size: int = 32,
@@ -550,6 +565,7 @@ def train(
         "norm_first": norm_first,
         "num_layers": num_layers,
         "weight_sharing": weight_sharing,
+        "weight_scale": weight_scale,
         "n_vocab": n_vocab,
         "epochs": epochs,
         "batch_size": batch_size,
@@ -577,6 +593,7 @@ def train(
         norm_first=norm_first,
         num_layers=num_layers,
         weight_sharing=weight_sharing,
+        weight_scale=weight_scale,
         n_vocab=n_vocab,
     )
 
