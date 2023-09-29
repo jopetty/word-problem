@@ -361,10 +361,10 @@ def train_mlp(
     dim_feedforward: int = 2048,
     activation: str = "relu",
     dropout: float = 0.1,
-    num_layers: int = 1,
+    num_layers: int = 6,
     weight_sharing: bool = False,
     # Training parameters
-    epochs: int = 10,
+    epochs: int = 500,
     batch_size: int = 32,
     lr: float = 1e-4,
     beta1: float = 0.9,
@@ -512,7 +512,7 @@ def train(
     num_layers: int = 6,
     weight_sharing: bool = False,
     # Training parameters
-    epochs: int = 10,
+    epochs: int = 500,
     batch_size: int = 32,
     lr: float = 1e-4,
     beta1: float = 0.9,
