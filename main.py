@@ -775,9 +775,7 @@ def train(
         accelerator.log(train_metrics, step=global_step)
 
         model.eval()
-        for batch in (
-            e_bar := tqdm(eval_dataloader, desc="Eval", position=2, leave=False)
-        ):
+        for batch in tqdm(eval_dataloader, desc="Eval", position=2, leave=False):
             source = batch["input"]
             target = batch["target"]
             with torch.no_grad():
