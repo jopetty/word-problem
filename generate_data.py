@@ -49,7 +49,6 @@ def main(
     seed: int = random.randint(0, 1_000_000),
     overwrite: bool = False,
 ):
-
     data_path = data_dir / f"{group}={k}.csv"
     if data_path.exists() and not overwrite:
         print(

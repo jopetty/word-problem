@@ -144,7 +144,6 @@ class MLPModel(nn.Module):
             p = weight_scale * p
 
     def forward(self, x):
-
         if self.weight_sharing:
             assert self.ff[0] == self.ff[-1], "Weights not shared!"
         else:
@@ -204,7 +203,6 @@ class EncoderModel(nn.Module):
             p = weight_scale * p
 
     def forward(self, x):
-
         if self.weight_sharing:
             assert (
                 self.encoder.layers[0] == self.encoder.layers[-1]
@@ -238,7 +236,6 @@ def tokenize(example: dict) -> dict:
 
 
 def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
-
     # Perform channel-wise padding
     channels = samples[0].keys()
     max_lens = {}
@@ -391,7 +388,6 @@ def train_mlp(
     project_name: str = "word_problems_mlp",
     logging: bool = True,
 ):
-
     accelerator = Accelerator(log_with="wandb") if logging else Accelerator()
     log.setLevel(log_level)
 
@@ -471,7 +467,6 @@ def train_mlp(
         for batch in (
             t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
         ):
-
             global_step += 1
             optimizer.zero_grad()
 
@@ -544,7 +539,6 @@ def train(
     project_name: str = "word_problems",
     logging: bool = True,
 ):
-
     set_seed(seed)
 
     accelerator = Accelerator(log_with="wandb") if logging else Accelerator()
@@ -661,7 +655,6 @@ def train(
         for batch in (
             t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
         ):
-
             global_step += 1
             optimizer.zero_grad()
 
