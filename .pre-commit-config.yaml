@@ -15,19 +15,12 @@ repos:
   rev: 23.9.1
   hooks:
     - id: black
-- repo: https://github.com/PyCQA/isort
-  rev: 5.12.0
-  hooks:
-    - id: isort
-      args:
-      - --profile
-      - black
 - repo: https://github.com/asottile/pyupgrade
   rev: v3.13.0
   hooks:
   - id: pyupgrade
     args:
-    - --py310-plus
+      - --py310-plus
 - repo: https://github.com/nbQA-dev/nbQA
   rev: 1.7.0
   hooks:
