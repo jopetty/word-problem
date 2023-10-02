@@ -1,3 +1,5 @@
+"""Main entry point for training models."""
+
 import copy
 import logging
 from enum import IntEnum, auto
@@ -10,7 +12,7 @@ import numpy as np
 import polars as pl
 import pyrootutils
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
@@ -36,36 +38,81 @@ load_dotenv()
 
 
 class SpecialTokens(IntEnum):
+    """Special tokens for tokernizer."""
+
     CLS = 0
     PAD = auto()
 
 
 class AvgPool(nn.Module):
+    """Averages over a specified dimension.
+
+    Attributes
+    ----------
+    dim: int, the dimension to average over.
+    """
+
     def __init__(self, dim: int):
+        """Initialize AvgPool.
+
+        Arguments:
+        ---------
+        dim: int, the dimension to average over.
+        """
         super().__init__()
         self.dim = dim
 
     def forward(self, x: Tensor) -> Tensor:
+        """Forward pass.
+
+        Arguments:
+        ---------
+        x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``.
+        """
         return x.mean(dim=self.dim)
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module."""
         return f"dim={self.dim}"
 
 
 class IndexPool(nn.Module):
+    """Selects a single index from a specified dimension.
+
+    Attributes
+    ----------
+    dim: int, the dimension to select from.
+    index: int, the index to select.
+    """
+
     def __init__(self, dim: int, index: int):
+        """Initialize IndexPool.
+
+        Arguments:
+        ---------
+        dim: int, the dimension to select from.
+        index: int, the index to select.
+        """
         super().__init__()
         self.dim = dim
         self.index = index
 
     def forward(self, x: Tensor) -> Tensor:
+        """Forward pass.
+
+        Arguments:
+        ---------
+        x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``.
+        """
         return x.select(dim=self.dim, index=self.index)
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module."""
         return f"dim={self.dim}, index={self.index}"
 
 
 def get_activation(activation: str) -> nn.Module:
+    """Get activation function from string."""
     if activation == "relu":
         return nn.ReLU()
     elif activation == "gelu":
@@ -87,7 +134,17 @@ def get_activation(activation: str) -> nn.Module:
 
 
 class PositionalEncoding(nn.Module):
+    """Positional encoding module."""
+
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        """Initialize PositionalEncoding.
+
+        Arguments:
+        ---------
+        d_model: int, the embedding dimension.
+        dropout: float, the dropout rate.
+        max_len: int, the maximum sequence length.
+        """
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -99,15 +156,19 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x: Tensor) -> Tensor:
-        """
+        """Forward pass.
+
         Arguments:
-            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
+        ---------
+            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``.
         """
         x = x + self.pe[: x.size(0)]
         return self.dropout(x)
 
 
 class MLPModel(nn.Module):
+    """MLP model."""
+
     def __init__(
         self,
         d_model: int,
@@ -120,6 +181,7 @@ class MLPModel(nn.Module):
         weight_sharing: bool,
         layer_norm_eps: float,
     ):
+        """Initialize MLPModel."""
         super().__init__()
         ff_layer = nn.Sequential(
             nn.Linear(d_model, dim_feedforward),
@@ -144,6 +206,7 @@ class MLPModel(nn.Module):
             p = weight_scale * p
 
     def forward(self, x):
+        """Forward pass."""
         if self.weight_sharing:
             assert self.ff[0] == self.ff[-1], "Weights not shared!"
         else:
@@ -159,6 +222,8 @@ class MLPModel(nn.Module):
 
 
 class EncoderModel(nn.Module):
+    """Transformer encoder model."""
+
     def __init__(
         self,
         d_model: int,
@@ -173,6 +238,7 @@ class EncoderModel(nn.Module):
         n_vocab: int,
         weight_scale: float,
     ):
+        """Initialize EncoderModel."""
         super().__init__()
         layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -203,6 +269,7 @@ class EncoderModel(nn.Module):
             p = weight_scale * p
 
     def forward(self, x):
+        """Forward pass."""
         if self.weight_sharing:
             assert (
                 self.encoder.layers[0] == self.encoder.layers[-1]
@@ -221,14 +288,17 @@ class EncoderModel(nn.Module):
 
 
 def tokenize(example: dict) -> dict:
-    # Tokenize data by converting inputs back into lists of integers; this
-    # allows us to leave the inputs as space-delimited strings in the CSV.
-    # Since we have special tokens ([CLS], [PAD], etc.) we need to shift
-    # each token by the number of special tokens. This doesn't
-    # matter for the internal representations, since the element names are
-    # arbitrary. The output is not shifted, the text representation of the
-    # input and output match [and are equal to the element index in the
-    # group from which they were generated].
+    """Tokenize a single example.
+
+    Tokenize data by converting inputs back into lists of integers; this
+    allows us to leave the inputs as space-delimited strings in the CSV.
+    Since we have special tokens ([CLS], [PAD], etc.) we need to shift
+    each token by the number of special tokens. This doesn't
+    matter for the internal representations, since the element names are
+    arbitrary. The output is not shifted, the text representation of the
+    input and output match [and are equal to the element index in the
+    group from which they were generated].
+    """
     tokenized = [int(t) + len(SpecialTokens) for t in str(example["input"]).split()]
     tokenized = [SpecialTokens.CLS.value] + tokenized
 
@@ -236,7 +306,10 @@ def tokenize(example: dict) -> dict:
 
 
 def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
-    # Perform channel-wise padding
+    """Collate function for DataLoader.
+
+    Performs channel-wise padding of the inputs and targets.
+    """
     channels = samples[0].keys()
     max_lens = {}
     for channel in channels:
@@ -266,6 +339,7 @@ def get_dataset(
     train_size: float,
     data_dir: str | Path,
 ) -> dict:
+    """Construct dataset."""
     assert train_size > 0 and train_size <= 1, "`train_size` must be in (0,1]"
 
     if not ((k is None) ^ (max_len is None)):
@@ -343,6 +417,7 @@ def get_dataset(
 
 
 def compute_metrics(metrics: list, prefix: str | None = None) -> dict:
+    """Compute metrics."""
     values_dict = {}
     for metric in metrics:
         simple_name = metric.name.split("/")[-1]
@@ -388,6 +463,9 @@ def train_mlp(
     project_name: str = "word_problems_mlp",
     logging: bool = True,
 ):
+    """Train MLP model."""
+    set_seed(seed)
+
     accelerator = Accelerator(log_with="wandb") if logging else Accelerator()
     log.setLevel(log_level)
 
@@ -539,6 +617,7 @@ def train(
     project_name: str = "word_problems",
     logging: bool = True,
 ):
+    """Train transformer model."""
     set_seed(seed)
 
     accelerator = Accelerator(log_with="wandb") if logging else Accelerator()
