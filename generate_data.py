@@ -1,3 +1,5 @@
+"""Generates data for the group sequence prediction task."""
+
 import os
 import random
 from functools import partial, reduce
@@ -18,7 +20,8 @@ PROJECT_ROOT = path = pyrootutils.find_root(
 )
 
 
-def group_reduce(lhs: str | int, rhs: int, G) -> int:
+def group_reduce(lhs: str | int, rhs: int, G) -> int:  # noqa: N803
+    """Reduce a sequence of group elements to a single element."""
     if isinstance(lhs, str):
         prod = G.op(lhs, G.elements[rhs])
     else:
@@ -28,6 +31,7 @@ def group_reduce(lhs: str | int, rhs: int, G) -> int:
 
 
 def generate_group(g: (str, int)) -> FiniteAlgebra:
+    """Generate an group from a string identifier."""
     if g[0] == "S":
         return generate_symmetric_group(g[1])
     elif g[0] == "Z":
@@ -49,7 +53,7 @@ def main(
     seed: int = random.randint(0, 1_000_000),
     overwrite: bool = False,
 ):
-
+    """Generate data for the group sequence prediction task."""
     data_path = data_dir / f"{group}={k}.csv"
     if data_path.exists() and not overwrite:
         print(
