@@ -34,7 +34,7 @@ repos:
   hooks:
     - id: nbqa-black
     - id: nbqa-pyupgrade
-      args: ["--py37-plus"]
+      args: ["--py310-plus"]
     - id: nbqa-isort
       args: ["--float-to-top"]
 - repo: https://github.com/kynan/nbstripout
