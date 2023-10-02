@@ -148,7 +148,8 @@ class MLPModel(nn.Module):
         if self.weight_sharing:
             assert self.ff[0] == self.ff[-1], "Weights not shared!"
         else:
-            assert self.ff[0] != self.ff[-1], "Weights shared!"
+            if len(self.ff) > 1:
+                assert self.ff[0] != self.ff[-1], "Weights shared!"
 
         x = self.embedding(x)
         for ff in self.ff:
@@ -209,7 +210,10 @@ class EncoderModel(nn.Module):
                 self.encoder.layers[0] == self.encoder.layers[-1]
             ), "Weights not shared!"
         else:
-            assert self.encoder.layers[0] != self.encoder.layers[-1], "Weights shared!"
+            if len(self.encoder.layers) > 1:
+                assert (
+                    self.encoder.layers[0] != self.encoder.layers[-1]
+                ), "Weights shared!"
 
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
