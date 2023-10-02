@@ -198,14 +198,15 @@ class MLPModel(nn.Module):
         weight_scale: float,
         weight_sharing: bool,
         layer_norm_eps: float,
+        bias: bool,
     ):
         """Initialize MLPModel."""
         super().__init__()
         ff_layer = nn.Sequential(
-            nn.Linear(d_model, dim_feedforward),
+            nn.Linear(d_model, dim_feedforward, bias=bias),
             get_activation(activation),
             nn.Dropout(dropout),
-            nn.Linear(dim_feedforward, d_model),
+            nn.Linear(dim_feedforward, d_model, bias=bias),
             nn.LayerNorm(d_model, layer_norm_eps),
         )
         self.weight_sharing = weight_sharing
@@ -219,7 +220,7 @@ class MLPModel(nn.Module):
             )
 
         self.pool = IndexPool(dim=1, index=0)
-        self.classifier = nn.Linear(d_model, n_vocab)
+        self.classifier = nn.Linear(d_model, n_vocab, bias=bias)
 
         for _, p in self.named_parameters():
             p = weight_scale * p
@@ -255,6 +256,7 @@ class EncoderModel(nn.Module):
         weight_sharing: bool,
         n_vocab: int,
         weight_scale: float,
+        bias: bool,
     ):
         """Initialize EncoderModel."""
         super().__init__()
@@ -267,6 +269,7 @@ class EncoderModel(nn.Module):
             layer_norm_eps=layer_norm_eps,
             batch_first=True,
             norm_first=norm_first,
+            bias=bias,
         )
         self.weight_sharing = weight_sharing
         self.num_layers = num_layers
@@ -274,7 +277,7 @@ class EncoderModel(nn.Module):
         self.pos_enc = PositionalEncoding(d_model, dropout)
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
         self.pool = IndexPool(dim=1, index=0)
-        self.classifier = nn.Linear(d_model, n_vocab)
+        self.classifier = nn.Linear(d_model, n_vocab, bias=bias)
 
         if weight_sharing:
             # `nn.Module`s are reference types, so we can just repeat the same
@@ -464,6 +467,7 @@ def train_mlp(
     weight_sharing: bool = False,
     weight_scale: float = 1.0,
     layer_norm_eps: float = 1e-05,
+    bias: bool = True,
     # Training parameters
     epochs: int = 500,
     batch_size: int = 32,
@@ -474,7 +478,7 @@ def train_mlp(
     weight_decay: float = 0.01,
     # Misc
     log_level: str = "INFO",
-    seed: int = randint(0, 1_000_000),
+    seed: int = randint(0, 2**32 - 1),
     project_name: str = "word_problems_mlp",
     logging: bool = True,
 ):
@@ -501,6 +505,7 @@ def train_mlp(
         "weight_sharing": weight_sharing,
         "weight_scale": weight_scale,
         "layer_norm_eps": layer_norm_eps,
+        "bias": bias,
         "n_vocab": n_vocab,
         "epochs": epochs,
         "batch_size": batch_size,
@@ -526,6 +531,7 @@ def train_mlp(
         weight_sharing=weight_sharing,
         weight_scale=weight_scale,
         layer_norm_eps=layer_norm_eps,
+        bias=bias,
         n_vocab=n_vocab,
     )
     log.info(f"Model: {model}")
@@ -618,6 +624,7 @@ def train(
     num_layers: int = 1,
     weight_sharing: bool = False,
     weight_scale: float = 1.0,
+    bias: bool = True,
     # Training parameters
     epochs: int = 500,
     batch_size: int = 32,
@@ -658,6 +665,7 @@ def train(
         "num_layers": num_layers,
         "weight_sharing": weight_sharing,
         "weight_scale": weight_scale,
+        "bias": bias,
         "n_vocab": n_vocab,
         "epochs": epochs,
         "batch_size": batch_size,
@@ -687,6 +695,7 @@ def train(
         weight_sharing=weight_sharing,
         weight_scale=weight_scale,
         n_vocab=n_vocab,
+        bias=bias,
     )
 
     log.info(f"Model: {model}")
