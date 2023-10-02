@@ -369,7 +369,7 @@ def train_mlp(
     dim_feedforward: int = 2048,
     activation: str = "relu",
     dropout: float = 0.1,
-    num_layers: int = 6,
+    num_layers: int = 1,
     weight_sharing: bool = False,
     weight_scale: float = 1.0,
     layer_norm_eps: float = 1e-05,
@@ -523,7 +523,7 @@ def train(
     activation: str = "relu",
     layer_norm_eps: float = 1e-5,
     norm_first: bool = False,
-    num_layers: int = 6,
+    num_layers: int = 1,
     weight_sharing: bool = False,
     weight_scale: float = 1.0,
     # Training parameters
