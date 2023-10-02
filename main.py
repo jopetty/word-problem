@@ -113,24 +113,42 @@ class IndexPool(nn.Module):
 
 def get_activation(activation: str) -> nn.Module:
     """Get activation function from string."""
-    if activation == "relu":
-        return nn.ReLU()
-    elif activation == "gelu":
-        return nn.GELU()
-    elif activation == "tanh":
-        return nn.Tanh()
-    elif activation == "sigmoid":
-        return nn.Sigmoid()
-    elif activation == "relu6":
-        return nn.ReLU6()
-    elif activation == "elu":
-        return nn.ELU()
-    elif activation == "selu":
-        return nn.SELU()
-    elif activation == "leaky_relu":
-        return nn.LeakyReLU()
-    else:
-        raise ValueError(f"Unknown activation: {activation}")
+    activation_funcs = {
+        "celu": nn.CELU,
+        "elu": nn.ELU,
+        "gelu": nn.GELU,
+        "glu": nn.GLU,
+        "hardshrink": nn.Hardshrink,
+        "hardsigmoid": nn.Hardsigmoid,
+        "hardswish": nn.Hardswish,
+        "hardtanh": nn.Hardtanh,
+        "leaky_relu": nn.LeakyReLU,
+        "logsigmoid": nn.LogSigmoid,
+        "log_softmax": nn.LogSoftmax,
+        "mish": nn.Mish,
+        "prelu": nn.PReLU,
+        "relu": nn.ReLU,
+        "relu6": nn.ReLU6,
+        "rrelu": nn.RReLU,
+        "selu": nn.SELU,
+        "sigmoid": nn.Sigmoid,
+        "silu": nn.SiLU,
+        "softmax": nn.Softmax,
+        "softmin": nn.Softmin,
+        "softplus": nn.Softplus,
+        "softshrink": nn.Softshrink,
+        "softsign": nn.Softsign,
+        "tanh": nn.Tanh,
+        "tanhshrink": nn.Tanhshrink,
+    }
+
+    if activation not in activation_funcs:
+        raise ValueError(
+            f"Unknown activation `{activation}`. Must be one of: "
+            f"{list(activation_funcs.keys())}"
+        )
+
+    return activation_funcs[activation]()
 
 
 class PositionalEncoding(nn.Module):
@@ -287,7 +305,7 @@ class EncoderModel(nn.Module):
 def tokenize(example: dict) -> dict:
     """Tokenize a single example.
 
-    Tokenize data by converting inputs back into lists of integers; this
+    Tokenizes data by converting inputs back into lists of integers; this
     allows us to leave the inputs as space-delimited strings in the CSV.
     Since we have special tokens ([CLS], [PAD], etc.) we need to shift
     each token by the number of special tokens. This doesn't
