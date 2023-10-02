@@ -192,8 +192,6 @@ class MLPModel(nn.Module):
         )
         self.weight_sharing = weight_sharing
         self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
-        self.pool = IndexPool(dim=1, index=0)
-        self.classifier = nn.Linear(d_model, n_vocab)
 
         if self.weight_sharing:
             self.ff = nn.ModuleList([ff_layer] * num_layers)
@@ -202,16 +200,18 @@ class MLPModel(nn.Module):
                 [copy.deepcopy(ff_layer) for _ in range(num_layers)]
             )
 
+        self.pool = IndexPool(dim=1, index=0)
+        self.classifier = nn.Linear(d_model, n_vocab)
+
         for _, p in self.named_parameters():
             p = weight_scale * p
 
     def forward(self, x):
         """Forward pass."""
-        if self.weight_sharing:
+        if self.weight_sharing or len(self.ff) == 1:
             assert self.ff[0] == self.ff[-1], "Weights not shared!"
         else:
-            if len(self.ff) > 1:
-                assert self.ff[0] != self.ff[-1], "Weights shared!"
+            assert self.ff[0] != self.ff[-1], "Weights shared!"
 
         x = self.embedding(x)
         for ff in self.ff:
@@ -270,15 +270,12 @@ class EncoderModel(nn.Module):
 
     def forward(self, x):
         """Forward pass."""
-        if self.weight_sharing:
+        if self.weight_sharing or len(self.encoder.layers) == 1:
             assert (
                 self.encoder.layers[0] == self.encoder.layers[-1]
             ), "Weights not shared!"
         else:
-            if len(self.encoder.layers) > 1:
-                assert (
-                    self.encoder.layers[0] != self.encoder.layers[-1]
-                ), "Weights shared!"
+            assert self.encoder.layers[0] != self.encoder.layers[-1], "Weights shared!"
 
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
