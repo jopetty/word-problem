@@ -293,8 +293,10 @@ class EncoderModel(nn.Module):
         self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
         self.pos_enc = PositionalEncoding(d_model, dropout)
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
-        self.pool = IndexPool(dim=1, index=0)
-        self.classifier = nn.Linear(d_model, n_vocab, bias=bias)
+        self.cl_head = nn.Sequential(
+            IndexPool(dim=1, index=0),
+            nn.Linear(d_model, n_vocab, bias=bias),
+        )
 
         if weight_sharing:
             # `nn.Module`s are reference types, so we can just repeat the same
@@ -318,7 +320,7 @@ class EncoderModel(nn.Module):
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
         x = self.pool(x)
-        logits = self.classifier(x)
+        logits = self.cl_head(x)
         return logits
 
 
