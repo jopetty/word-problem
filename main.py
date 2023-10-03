@@ -400,17 +400,12 @@ def get_dataset(
         log.info("Constructing dataset from:")
         log.info("  " + "\n  ".join(map(str, data_paths)))
 
-    # We can find n_vocab just by looking at the k=2 data, since this is
+    # We can find n_vocab just by looking at the k=2 inputs, since this is
     # guaranteed to contain all the elements in the group.
     n_vocab = (
         pl.read_csv(data_paths[0])
-        .with_columns(
-            pl.concat_str([pl.col("input"), pl.col("target")], separator=" ").alias(
-                "merged"
-            )
-        )
-        .select(pl.col("merged").map_batches(lambda x: x.str.split(" ")))
-        .explode("merged")
+        .select(pl.col("input").map_batches(lambda x: x.str.split(" ")))
+        .explode("input")
         .unique()
         .shape[0]
     )
