@@ -76,6 +76,24 @@ class AvgPool(nn.Module):
         return f"dim={self.dim}"
 
 
+class SumPool(nn.Module):
+    """Sums over a specified dimension."""
+
+    def __init__(self, dim: int):
+        """Initialize SumPool.
+
+        Arguments:
+        ---------
+        dim: int, the dimension to sum over.
+        """
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Forward pass."""
+        return x.sum(dim=self.dim)
+
+
 class IndexPool(nn.Module):
     """Selects a single index from a specified dimension.
 
