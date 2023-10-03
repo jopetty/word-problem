@@ -76,6 +76,24 @@ class AvgPool(nn.Module):
         return f"dim={self.dim}"
 
 
+class SumPool(nn.Module):
+    """Sums over a specified dimension."""
+
+    def __init__(self, dim: int):
+        """Initialize SumPool.
+
+        Arguments:
+        ---------
+        dim: int, the dimension to sum over.
+        """
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Forward pass."""
+        return x.sum(dim=self.dim)
+
+
 class IndexPool(nn.Module):
     """Selects a single index from a specified dimension.
 
@@ -198,14 +216,17 @@ class MLPModel(nn.Module):
         weight_scale: float,
         weight_sharing: bool,
         layer_norm_eps: float,
+        seq_len: int,
+        bias: bool,
     ):
         """Initialize MLPModel."""
         super().__init__()
         ff_layer = nn.Sequential(
-            nn.Linear(d_model, dim_feedforward),
+            nn.Flatten(),
+            nn.Linear(d_model * seq_len, dim_feedforward, bias=bias),
             get_activation(activation),
             nn.Dropout(dropout),
-            nn.Linear(dim_feedforward, d_model),
+            nn.Linear(dim_feedforward, d_model, bias=bias),
             nn.LayerNorm(d_model, layer_norm_eps),
         )
         self.weight_sharing = weight_sharing
@@ -217,9 +238,7 @@ class MLPModel(nn.Module):
             self.ff = nn.ModuleList(
                 [copy.deepcopy(ff_layer) for _ in range(num_layers)]
             )
-
-        self.pool = IndexPool(dim=1, index=0)
-        self.classifier = nn.Linear(d_model, n_vocab)
+        self.cl_head = nn.Linear(d_model, n_vocab, bias=bias)
 
         for _, p in self.named_parameters():
             p = weight_scale * p
@@ -234,8 +253,7 @@ class MLPModel(nn.Module):
         x = self.embedding(x)
         for ff in self.ff:
             x = ff(x)
-        x = self.pool(x)
-        logits = self.classifier(x)
+        logits = self.cl_head(x)
         return logits
 
 
@@ -255,6 +273,7 @@ class EncoderModel(nn.Module):
         weight_sharing: bool,
         n_vocab: int,
         weight_scale: float,
+        bias: bool,
     ):
         """Initialize EncoderModel."""
         super().__init__()
@@ -267,14 +286,17 @@ class EncoderModel(nn.Module):
             layer_norm_eps=layer_norm_eps,
             batch_first=True,
             norm_first=norm_first,
+            bias=bias,
         )
         self.weight_sharing = weight_sharing
         self.num_layers = num_layers
         self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
         self.pos_enc = PositionalEncoding(d_model, dropout)
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
-        self.pool = IndexPool(dim=1, index=0)
-        self.classifier = nn.Linear(d_model, n_vocab)
+        self.cl_head = nn.Sequential(
+            IndexPool(dim=1, index=0),
+            nn.Linear(d_model, n_vocab, bias=bias),
+        )
 
         if weight_sharing:
             # `nn.Module`s are reference types, so we can just repeat the same
@@ -297,8 +319,7 @@ class EncoderModel(nn.Module):
 
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
-        x = self.pool(x)
-        logits = self.classifier(x)
+        logits = self.cl_head(x)
         return logits
 
 
@@ -310,7 +331,7 @@ def tokenize(example: dict) -> dict:
     Since we have special tokens ([CLS], [PAD], etc.) we need to shift
     each token by the number of special tokens. This doesn't
     matter for the internal representations, since the element names are
-    arbitrary. The output is not shifted, the text representation of the
+    arbitrary. The output is not shifted, so the text representation of the
     input and output match [and are equal to the element index in the
     group from which they were generated].
     """
@@ -378,17 +399,12 @@ def get_dataset(
         log.info("Constructing dataset from:")
         log.info("  " + "\n  ".join(map(str, data_paths)))
 
-    # We can find n_vocab just by looking at the k=2 data, since this is
+    # We can find n_vocab just by looking at the k=2 inputs, since this is
     # guaranteed to contain all the elements in the group.
     n_vocab = (
         pl.read_csv(data_paths[0])
-        .with_columns(
-            pl.concat_str([pl.col("input"), pl.col("target")], separator=" ").alias(
-                "merged"
-            )
-        )
-        .select(pl.col("merged").map_batches(lambda x: x.str.split(" ")))
-        .explode("merged")
+        .select(pl.col("input").map_batches(lambda x: x.str.split(" ")))
+        .explode("input")
         .unique()
         .shape[0]
     )
@@ -464,17 +480,18 @@ def train_mlp(
     weight_sharing: bool = False,
     weight_scale: float = 1.0,
     layer_norm_eps: float = 1e-05,
+    bias: bool = True,
     # Training parameters
     epochs: int = 500,
     batch_size: int = 32,
-    lr: float = 1e-4,
+    lr: float = 1e-3,
     beta1: float = 0.9,
     beta2: float = 0.999,
     op_eps: float = 1e-8,
     weight_decay: float = 0.01,
     # Misc
     log_level: str = "INFO",
-    seed: int = randint(0, 1_000_000),
+    seed: int = randint(0, 2**32 - 1),
     project_name: str = "word_problems_mlp",
     logging: bool = True,
 ):
@@ -501,6 +518,7 @@ def train_mlp(
         "weight_sharing": weight_sharing,
         "weight_scale": weight_scale,
         "layer_norm_eps": layer_norm_eps,
+        "bias": bias,
         "n_vocab": n_vocab,
         "epochs": epochs,
         "batch_size": batch_size,
@@ -526,7 +544,9 @@ def train_mlp(
         weight_sharing=weight_sharing,
         weight_scale=weight_scale,
         layer_norm_eps=layer_norm_eps,
+        bias=bias,
         n_vocab=n_vocab,
+        seq_len=3,
     )
     log.info(f"Model: {model}")
     log.info(f"Accelerator state: {accelerator.state}")
@@ -618,6 +638,7 @@ def train(
     num_layers: int = 1,
     weight_sharing: bool = False,
     weight_scale: float = 1.0,
+    bias: bool = True,
     # Training parameters
     epochs: int = 500,
     batch_size: int = 32,
@@ -658,6 +679,7 @@ def train(
         "num_layers": num_layers,
         "weight_sharing": weight_sharing,
         "weight_scale": weight_scale,
+        "bias": bias,
         "n_vocab": n_vocab,
         "epochs": epochs,
         "batch_size": batch_size,
@@ -687,6 +709,7 @@ def train(
         weight_sharing=weight_sharing,
         weight_scale=weight_scale,
         n_vocab=n_vocab,
+        bias=bias,
     )
 
     log.info(f"Model: {model}")
