@@ -216,12 +216,14 @@ class MLPModel(nn.Module):
         weight_scale: float,
         weight_sharing: bool,
         layer_norm_eps: float,
+        seq_len: int,
         bias: bool,
     ):
         """Initialize MLPModel."""
         super().__init__()
         ff_layer = nn.Sequential(
-            nn.Linear(d_model, dim_feedforward, bias=bias),
+            nn.Flatten(),
+            nn.Linear(d_model * seq_len, dim_feedforward, bias=bias),
             get_activation(activation),
             nn.Dropout(dropout),
             nn.Linear(dim_feedforward, d_model, bias=bias),
@@ -236,9 +238,7 @@ class MLPModel(nn.Module):
             self.ff = nn.ModuleList(
                 [copy.deepcopy(ff_layer) for _ in range(num_layers)]
             )
-
-        self.pool = IndexPool(dim=1, index=0)
-        self.classifier = nn.Linear(d_model, n_vocab, bias=bias)
+        self.cl_head = nn.Linear(d_model, n_vocab, bias=bias)
 
         for _, p in self.named_parameters():
             p = weight_scale * p
@@ -253,8 +253,7 @@ class MLPModel(nn.Module):
         x = self.embedding(x)
         for ff in self.ff:
             x = ff(x)
-        x = self.pool(x)
-        logits = self.classifier(x)
+        logits = self.cl_head(x)
         return logits
 
 
@@ -489,7 +488,7 @@ def train_mlp(
     # Training parameters
     epochs: int = 500,
     batch_size: int = 32,
-    lr: float = 1e-4,
+    lr: float = 1e-3,
     beta1: float = 0.9,
     beta2: float = 0.999,
     op_eps: float = 1e-8,
@@ -551,6 +550,7 @@ def train_mlp(
         layer_norm_eps=layer_norm_eps,
         bias=bias,
         n_vocab=n_vocab,
+        seq_len=3,
     )
     log.info(f"Model: {model}")
     log.info(f"Accelerator state: {accelerator.state}")
