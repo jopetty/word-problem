@@ -319,7 +319,6 @@ class EncoderModel(nn.Module):
 
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
-        x = self.pool(x)
         logits = self.cl_head(x)
         return logits
 
