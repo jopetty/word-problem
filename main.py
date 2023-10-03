@@ -332,7 +332,7 @@ def tokenize(example: dict) -> dict:
     Since we have special tokens ([CLS], [PAD], etc.) we need to shift
     each token by the number of special tokens. This doesn't
     matter for the internal representations, since the element names are
-    arbitrary. The output is not shifted, the text representation of the
+    arbitrary. The output is not shifted, so the text representation of the
     input and output match [and are equal to the element index in the
     group from which they were generated].
     """
