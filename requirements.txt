@@ -12,5 +12,6 @@ scikit-learn
 numpy
 pre-commit
 tqdm
+torcheval
 wandb
 pydotenv
