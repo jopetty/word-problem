@@ -2,7 +2,7 @@
 
 import copy
 import logging
-from enum import IntEnum, auto
+from enum import IntEnum
 from pathlib import Path
 from pprint import pformat
 from random import randint
@@ -18,7 +18,6 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from datasets import concatenate_datasets, load_dataset
 from dotenv import load_dotenv
-from evaluate import load as load_metric
 from torch import Tensor, nn, optim
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -40,8 +39,7 @@ load_dotenv()
 class SpecialTokens(IntEnum):
     """Special tokens for tokernizer."""
 
-    CLS = 0
-    PAD = auto()
+    BOS = 0
 
 
 class AvgPool(nn.Module):
@@ -293,10 +291,7 @@ class EncoderModel(nn.Module):
         self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
         self.pos_enc = PositionalEncoding(d_model, dropout)
         self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
-        self.cl_head = nn.Sequential(
-            IndexPool(dim=1, index=0),
-            nn.Linear(d_model, n_vocab, bias=bias),
-        )
+        self.cl_head = nn.Linear(d_model, n_vocab + len(SpecialTokens), bias=bias)
 
         if weight_sharing:
             # `nn.Module`s are reference types, so we can just repeat the same
@@ -320,6 +315,10 @@ class EncoderModel(nn.Module):
         x = self.pos_enc(self.embedding(x))
         x = self.encoder(x)
         logits = self.cl_head(x)
+
+        # transpose the last two dimensions of logits
+        logits = logits.transpose(-1, -2)
+
         return logits
 
 
@@ -328,17 +327,21 @@ def tokenize(example: dict) -> dict:
 
     Tokenizes data by converting inputs back into lists of integers; this
     allows us to leave the inputs as space-delimited strings in the CSV.
-    Since we have special tokens ([CLS], [PAD], etc.) we need to shift
+    Since we have special tokens ([BOS], etc.) we need to shift
     each token by the number of special tokens. This doesn't
     matter for the internal representations, since the element names are
     arbitrary. The output is not shifted, so the text representation of the
     input and output match [and are equal to the element index in the
     group from which they were generated].
     """
-    tokenized = [int(t) + len(SpecialTokens) for t in str(example["input"]).split()]
-    tokenized = [SpecialTokens.CLS.value] + tokenized
+    tokenized_in = [int(t) + len(SpecialTokens) for t in str(example["input"]).split()]
+    tokenized_in = [SpecialTokens.BOS.value] + tokenized_in
+    tokenized_out = [
+        int(t) + len(SpecialTokens) for t in str(example["target"]).split()
+    ]
+    tokenized_out = [SpecialTokens.BOS.value] + tokenized_out
 
-    return {"input": tokenized, "target": int(example["target"])}
+    return {"input": tokenized_in, "target": tokenized_out}
 
 
 def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
@@ -359,7 +362,7 @@ def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
                 s[channel] = F.pad(
                     s[channel],
                     (0, max_lens[channel] - s[channel].shape[0]),
-                    value=SpecialTokens.PAD.value,
+                    value=len(SpecialTokens),
                 )
 
     collated = {}
@@ -413,7 +416,7 @@ def get_dataset(
     if len(data_paths) == 1:
         dataset = (
             load_dataset("csv", data_files=str(data_paths[0]), split="all")
-            .remove_columns(["length"])
+            .remove_columns(["seed"])
             .map(tokenize)
             .with_format(type="torch")
         )
@@ -422,14 +425,14 @@ def get_dataset(
     else:
         pair_data = (
             load_dataset("csv", data_files=str(data_paths[0]), split="all")
-            .remove_columns(["length"])
+            .remove_columns(["seed"])
             .map(tokenize)
             .with_format(type="torch")
         )
         long_data = [
             (
                 load_dataset("csv", data_files=str(p), split="all")
-                .remove_columns(["length"])
+                .remove_columns(["seed"])
                 .map(tokenize)
                 .with_format(type="torch")
             )
@@ -447,19 +450,52 @@ def get_dataset(
     }
 
 
-def compute_metrics(metrics: list, prefix: str | None = None) -> dict:
+def compute_metrics(data: list[(Tensor, Tensor)], prefix: str | None = None) -> dict:
     """Compute metrics."""
     values_dict = {}
-    for metric in metrics:
-        simple_name = metric.name.split("/")[-1]
-        if simple_name in ["accuracy", "confusion_matrix"]:
-            values_dict[simple_name] = metric.compute()[metric.name]
-        elif simple_name in ["precision", "recall"]:
-            values_dict[simple_name] = metric.compute(
-                average="weighted", zero_division=0
-            )[metric.name]
-        elif simple_name == "f1":
-            values_dict[simple_name] = metric.compute(average="weighted")[metric.name]
+
+    detached_data = [(d[0].cpu().detach(), d[1].cpu().detach()) for d in data]
+
+    seq_len_max = max([d[0].shape[2] for d in detached_data])
+    padded_preds = []
+    padded_tgts = []
+    for d in detached_data:
+        pred, tgt = d
+        pred_pad_size = seq_len_max - pred.shape[2]
+        tgt_pad_size = seq_len_max - tgt.shape[1]
+
+        if pred_pad_size > 0:
+            padding = (pred_pad_size, 0)
+            padded_pred = F.pad(pred[:, :, 1:], padding, value=1)
+            padded_pred = torch.cat((pred[:, :, 0].unsqueeze(-1), padded_pred), dim=-1)
+            padded_preds.append(padded_pred)
+        else:
+            padded_preds.append(pred)
+
+        if tgt_pad_size > 0:
+            padding = (tgt_pad_size, 0)
+            padded_tgt = F.pad(tgt[:, 1:], padding, value=1)
+            padded_tgt = torch.cat((tgt[:, 0].unsqueeze(-1), padded_tgt), dim=-1)
+            padded_tgts.append(padded_tgt)
+        else:
+            padded_tgts.append(tgt)
+
+    preds = torch.cat(padded_preds, dim=0)
+    tgts = torch.cat(padded_tgts, dim=0)
+
+    values_dict["loss"] = F.cross_entropy(preds, tgts).mean().item()
+    values_dict["token_accuracy"] = (
+        torch.eq(preds.argmax(dim=1), tgts).float().mean().item()
+    )
+    values_dict["accuracy"] = (
+        torch.eq(preds.argmax(dim=1), tgts)
+        .float()
+        .sum(dim=1)
+        .div(tgts.shape[1])
+        .floor()
+        .mean()
+        .item()
+    )
 
     if prefix is not None:
         values_dict = {f"{prefix}/{k}": v for k, v in values_dict.items()}
@@ -571,12 +607,13 @@ def train_mlp(
         model, optimizer, train_dataloader
     )
 
-    metrics = [load_metric("accuracy")]
+    # metrics = [load_metric("accuracy")]
 
     global_step = 0
     for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
         model.train()
         train_loss = []
+        train_metric_data = []
         for batch in (
             t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
         ):
@@ -592,20 +629,22 @@ def train_mlp(
 
             predictions, references = accelerator.gather_for_metrics((output, target))
 
-            log.debug(f"Inputs: {source}")
-            log.debug(f"Predictions: {predictions.argmax(dim=-1)}")
-            log.debug(f"References: {references}")
+            train_metric_data.append((predictions, references))
 
-            for metric in metrics:
-                metric.add_batch(
-                    predictions=predictions.argmax(dim=-1), references=references
-                )
+            # log.debug(f"Inputs: {source}")
+            # log.debug(f"Predictions: {predictions.argmax(dim=-1)}")
+            # log.debug(f"References: {references}")
+
+            # for metric in metrics:
+            #     metric.add_batch(
+            #         predictions=predictions.argmax(dim=-1), references=references
+            #     )
             accelerator.backward(loss)
             optimizer.step()
 
             t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
 
-        train_metrics = compute_metrics(metrics, prefix="train")
+        train_metrics = compute_metrics(train_metric_data, prefix="train")
         train_metrics["train/loss"] = np.mean(train_loss)
         n_bar.set_postfix(
             {
@@ -647,6 +686,7 @@ def train(
     beta2: float = 0.999,
     op_eps: float = 1e-8,
     weight_decay: float = 0.01,
+    compile: bool = False,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
@@ -670,6 +710,7 @@ def train(
         "max_len": max_len,
         "group": group,
         "d_model": d_model,
+        "compile": compile,
         "nhead": nhead,
         "dim_feedforward": dim_feedforward,
         "dropout": dropout,
@@ -711,6 +752,15 @@ def train(
         n_vocab=n_vocab,
         bias=bias,
     )
+
+    if compile:
+        log.info("Compiling model...")
+        # TODO: This may not work on CUDA. It doesn't seem like
+        # this should be necessary since
+        # # https://github.com/pytorch/pytorch/pull/96980 was merged, but
+        # not specifying the backend causes an error.
+        model = torch.compile(model, backend="aot_eager")
+        log.info("Model compiled!")
 
     log.info(f"Model: {model}")
     log.info(f"Accelerator state: {accelerator.state}")
@@ -756,19 +806,10 @@ def train(
         model, optimizer, train_dataloader, eval_dataloader
     )
 
-    # Construct metrics
-    metrics = [
-        load_metric("accuracy"),
-        load_metric("precision"),
-        load_metric("recall"),
-        load_metric("f1"),
-        load_metric("BucketHeadP65/confusion_matrix"),
-    ]
-
     global_step = 0
     for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
         model.train()
-        train_loss = []
+        train_data = []
         for batch in (
             t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
         ):
@@ -780,36 +821,36 @@ def train(
             output = model(source)
 
             loss = F.cross_entropy(output, target)
-            train_loss.append(loss.item())
 
             predictions, references = accelerator.gather_for_metrics((output, target))
 
-            for metric in metrics:
-                metric.add_batch(
-                    predictions=predictions.argmax(dim=-1), references=references
-                )
+            train_data.append((predictions, references))
+
+            # if np.random.random_sample() < 0.01:
+            #     print(f"preds: {predictions.argmax(dim=1)}")
+            #     print(f"trgts: {references}")
+
             accelerator.backward(loss)
             optimizer.step()
 
             t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
 
-        train_metrics = compute_metrics(metrics, prefix="train")
-        train_metrics["train/loss"] = np.mean(train_loss)
+        train_metrics = compute_metrics(train_data, prefix="train")
         accelerator.log(train_metrics, step=global_step)
 
         model.eval()
-        for batch in tqdm(eval_dataloader, desc="Eval", position=2, leave=False):
+        eval_data = []
+        for batch in tqdm(eval_dataloader, desc="Eval", position=1, leave=False):
             source = batch["input"]
             target = batch["target"]
             with torch.no_grad():
                 output = model(source)
-            predictions, references = accelerator.gather_for_metrics((output, target))
-            for metric in metrics:
-                metric.add_batch(
-                    predictions=predictions.argmax(dim=-1), references=references
-                )
 
-        eval_metrics = compute_metrics(metrics, prefix="val")
+            predictions, references = accelerator.gather_for_metrics((output, target))
+
+            eval_data.append((predictions, references))
+
+        eval_metrics = compute_metrics(eval_data, prefix="val")
         accelerator.log(eval_metrics, step=global_step)
         accelerator.log({"epoch": epoch}, step=global_step)
 
