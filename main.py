@@ -1,6 +1,5 @@
 """Main entry point for training models."""
 
-import copy
 import logging
 from enum import IntEnum
 from pathlib import Path
@@ -18,7 +17,9 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from datasets import concatenate_datasets, load_dataset
 from dotenv import load_dotenv
-from torch import Tensor, nn, optim
+from sfirah.mlp import MLPSequenceClassifier
+from sfirah.transformers import EncoderTokenClassifier
+from torch import Tensor, optim
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -40,286 +41,6 @@ class SpecialTokens(IntEnum):
     """Special tokens for tokernizer."""
 
     BOS = 0
-
-
-class AvgPool(nn.Module):
-    """Averages over a specified dimension.
-
-    Attributes
-    ----------
-    dim: int, the dimension to average over.
-    """
-
-    def __init__(self, dim: int):
-        """Initialize AvgPool.
-
-        Arguments:
-        ---------
-        dim: int, the dimension to average over.
-        """
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Forward pass.
-
-        Arguments:
-        ---------
-        x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``.
-        """
-        return x.mean(dim=self.dim)
-
-    def extra_repr(self) -> str:
-        """Return a string representation of the module."""
-        return f"dim={self.dim}"
-
-
-class SumPool(nn.Module):
-    """Sums over a specified dimension."""
-
-    def __init__(self, dim: int):
-        """Initialize SumPool.
-
-        Arguments:
-        ---------
-        dim: int, the dimension to sum over.
-        """
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Forward pass."""
-        return x.sum(dim=self.dim)
-
-
-class IndexPool(nn.Module):
-    """Selects a single index from a specified dimension.
-
-    Attributes
-    ----------
-    dim: int, the dimension to select from.
-    index: int, the index to select.
-    """
-
-    def __init__(self, dim: int, index: int):
-        """Initialize IndexPool.
-
-        Arguments:
-        ---------
-        dim: int, the dimension to select from.
-        index: int, the index to select.
-        """
-        super().__init__()
-        self.dim = dim
-        self.index = index
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Forward pass.
-
-        Arguments:
-        ---------
-        x: Tensor, shape ``[batch_size, seq_len, embedding_dim]``.
-        """
-        return x.select(dim=self.dim, index=self.index)
-
-    def extra_repr(self) -> str:
-        """Return a string representation of the module."""
-        return f"dim={self.dim}, index={self.index}"
-
-
-def get_activation(activation: str) -> nn.Module:
-    """Get activation function from string."""
-    activation_funcs = {
-        "celu": nn.CELU,
-        "elu": nn.ELU,
-        "gelu": nn.GELU,
-        "glu": nn.GLU,
-        "hardshrink": nn.Hardshrink,
-        "hardsigmoid": nn.Hardsigmoid,
-        "hardswish": nn.Hardswish,
-        "hardtanh": nn.Hardtanh,
-        "leaky_relu": nn.LeakyReLU,
-        "logsigmoid": nn.LogSigmoid,
-        "log_softmax": nn.LogSoftmax,
-        "mish": nn.Mish,
-        "prelu": nn.PReLU,
-        "relu": nn.ReLU,
-        "relu6": nn.ReLU6,
-        "rrelu": nn.RReLU,
-        "selu": nn.SELU,
-        "sigmoid": nn.Sigmoid,
-        "silu": nn.SiLU,
-        "softmax": nn.Softmax,
-        "softmin": nn.Softmin,
-        "softplus": nn.Softplus,
-        "softshrink": nn.Softshrink,
-        "softsign": nn.Softsign,
-        "tanh": nn.Tanh,
-        "tanhshrink": nn.Tanhshrink,
-    }
-
-    if activation not in activation_funcs:
-        raise ValueError(
-            f"Unknown activation `{activation}`. Must be one of: "
-            f"{list(activation_funcs.keys())}"
-        )
-
-    return activation_funcs[activation]()
-
-
-class PositionalEncoding(nn.Module):
-    """Positional encoding module."""
-
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
-        """Initialize PositionalEncoding.
-
-        Arguments:
-        ---------
-        d_model: int, the embedding dimension.
-        dropout: float, the dropout rate.
-        max_len: int, the maximum sequence length.
-        """
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-np.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
-        self.register_buffer("pe", pe)
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Forward pass.
-
-        Arguments:
-        ---------
-            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``.
-        """
-        x = x + self.pe[: x.size(0)]
-        return self.dropout(x)
-
-
-class MLPModel(nn.Module):
-    """MLP model."""
-
-    def __init__(
-        self,
-        d_model: int,
-        dim_feedforward: int,
-        dropout: float,
-        activation: str,
-        num_layers: int,
-        n_vocab: int,
-        weight_scale: float,
-        weight_sharing: bool,
-        layer_norm_eps: float,
-        seq_len: int,
-        bias: bool,
-    ):
-        """Initialize MLPModel."""
-        super().__init__()
-        ff_layer = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(d_model * seq_len, dim_feedforward, bias=bias),
-            get_activation(activation),
-            nn.Dropout(dropout),
-            nn.Linear(dim_feedforward, d_model, bias=bias),
-            nn.LayerNorm(d_model, layer_norm_eps),
-        )
-        self.weight_sharing = weight_sharing
-        self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
-
-        if self.weight_sharing:
-            self.ff = nn.ModuleList([ff_layer] * num_layers)
-        else:
-            self.ff = nn.ModuleList(
-                [copy.deepcopy(ff_layer) for _ in range(num_layers)]
-            )
-        self.cl_head = nn.Linear(d_model, n_vocab, bias=bias)
-
-        for _, p in self.named_parameters():
-            p = weight_scale * p
-
-    def forward(self, x):
-        """Forward pass."""
-        if self.weight_sharing or len(self.ff) == 1:
-            assert self.ff[0] == self.ff[-1], "Weights not shared!"
-        else:
-            assert self.ff[0] != self.ff[-1], "Weights shared!"
-
-        x = self.embedding(x)
-        for ff in self.ff:
-            x = ff(x)
-        logits = self.cl_head(x)
-        return logits
-
-
-class EncoderModel(nn.Module):
-    """Transformer encoder model."""
-
-    def __init__(
-        self,
-        d_model: int,
-        nhead: int,
-        dim_feedforward: int,
-        dropout: float,
-        activation: str,
-        layer_norm_eps: float,
-        norm_first: bool,
-        num_layers: int,
-        weight_sharing: bool,
-        n_vocab: int,
-        weight_scale: float,
-        bias: bool,
-    ):
-        """Initialize EncoderModel."""
-        super().__init__()
-        layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation=activation,
-            layer_norm_eps=layer_norm_eps,
-            batch_first=True,
-            norm_first=norm_first,
-            bias=bias,
-        )
-        self.weight_sharing = weight_sharing
-        self.num_layers = num_layers
-        self.embedding = nn.Embedding(n_vocab + len(SpecialTokens), d_model)
-        self.pos_enc = PositionalEncoding(d_model, dropout)
-        self.encoder = nn.TransformerEncoder(layer, num_layers=num_layers)
-        self.cl_head = nn.Linear(d_model, n_vocab + len(SpecialTokens), bias=bias)
-
-        if weight_sharing:
-            # `nn.Module`s are reference types, so we can just repeat the same
-            # `layer` object to achieve weight sharing. See the internal
-            # implementation of `nn.TransformerEncoder` to see how this is
-            # _not_ done by default via `copy.deepcopy`.
-            self.encoder.layers = nn.ModuleList([layer] * num_layers)
-
-        for _, p in self.named_parameters():
-            p = weight_scale * p
-
-    def forward(self, x):
-        """Forward pass."""
-        if self.weight_sharing or len(self.encoder.layers) == 1:
-            assert (
-                self.encoder.layers[0] == self.encoder.layers[-1]
-            ), "Weights not shared!"
-        else:
-            assert self.encoder.layers[0] != self.encoder.layers[-1], "Weights shared!"
-
-        x = self.pos_enc(self.embedding(x))
-        x = self.encoder(x)
-        logits = self.cl_head(x)
-
-        # transpose the last two dimensions of logits
-        logits = logits.transpose(-1, -2)
-
-        return logits
 
 
 def tokenize(example: dict) -> dict:
@@ -446,7 +167,7 @@ def get_dataset(
 
     return {
         "dataset": dataset,
-        "n_vocab": n_vocab,
+        "n_vocab": n_vocab + len(SpecialTokens),
     }
 
 
@@ -571,7 +292,7 @@ def train_mlp(
         config=project_hps,
     )
 
-    model = MLPModel(
+    model = MLPSequenceClassifier(
         d_model=d_model,
         dim_feedforward=dim_feedforward,
         activation=activation,
@@ -607,8 +328,6 @@ def train_mlp(
         model, optimizer, train_dataloader
     )
 
-    # metrics = [load_metric("accuracy")]
-
     global_step = 0
     for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
         model.train()
@@ -631,14 +350,6 @@ def train_mlp(
 
             train_metric_data.append((predictions, references))
 
-            # log.debug(f"Inputs: {source}")
-            # log.debug(f"Predictions: {predictions.argmax(dim=-1)}")
-            # log.debug(f"References: {references}")
-
-            # for metric in metrics:
-            #     metric.add_batch(
-            #         predictions=predictions.argmax(dim=-1), references=references
-            #     )
             accelerator.backward(loss)
             optimizer.step()
 
@@ -738,18 +449,19 @@ def train(
     )
 
     # Construct model
-    model = EncoderModel(
+    model = EncoderTokenClassifier(
         d_model=d_model,
-        nhead=nhead,
-        dim_feedforward=dim_feedforward,
+        n_heads=nhead,
+        d_ff=dim_feedforward,
         dropout=dropout,
         activation=activation,
         layer_norm_eps=layer_norm_eps,
         norm_first=norm_first,
-        num_layers=num_layers,
+        n_layers=num_layers,
         weight_sharing=weight_sharing,
         weight_scale=weight_scale,
         n_vocab=n_vocab,
+        batch_first=True,
         bias=bias,
     )
 
@@ -826,9 +538,9 @@ def train(
 
             train_data.append((predictions, references))
 
-            # if np.random.random_sample() < 0.01:
-            #     print(f"preds: {predictions.argmax(dim=1)}")
-            #     print(f"trgts: {references}")
+            if np.random.random_sample() < 0.01:
+                print(f"preds: {predictions.argmax(dim=1)}")
+                print(f"trgts: {references}")
 
             accelerator.backward(loss)
             optimizer.step()
