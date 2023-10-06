@@ -1,7 +1,9 @@
 """Main entry point for training models."""
 
 import logging
-from enum import IntEnum
+from collections.abc import Callable
+from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from pprint import pformat
 from random import randint
@@ -17,11 +19,17 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from datasets import concatenate_datasets, load_dataset
 from dotenv import load_dotenv
+from sfirah.metrics import ce_loss, sequence_accuracy, token_accuracy
 from sfirah.mlp import MLPSequenceClassifier
 from sfirah.transformers import EncoderTokenClassifier
+from tokenizers import Tokenizer
+from tokenizers.models import WordLevel
+from tokenizers.pre_tokenizers import WhitespaceSplit
+from tokenizers.processors import TemplateProcessing
 from torch import Tensor, optim
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
+from transformers import PreTrainedTokenizerFast
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -37,32 +45,36 @@ PROJECT_ROOT = path = pyrootutils.find_root(
 load_dotenv()
 
 
-class SpecialTokens(IntEnum):
-    """Special tokens for tokernizer."""
+class SpecialTokens(StrEnum):
+    """Special tokens for tokenizer.
 
-    BOS = 0
-
-
-def tokenize(example: dict) -> dict:
-    """Tokenize a single example.
-
-    Tokenizes data by converting inputs back into lists of integers; this
-    allows us to leave the inputs as space-delimited strings in the CSV.
-    Since we have special tokens ([BOS], etc.) we need to shift
-    each token by the number of special tokens. This doesn't
-    matter for the internal representations, since the element names are
-    arbitrary. The output is not shifted, so the text representation of the
-    input and output match [and are equal to the element index in the
-    group from which they were generated].
+    Uses the group identity element '0' as the padding token, allowing us to pad
+    supervised tagging tasks easily. Note that for this to make semantic sense,
+    we must use left-padding. Aside from PAD and BOS, the other tokens are not used,
+    but it's useful to have them to prevent PreTrainedFastTokenizer from complaining
+    that they are missing.
     """
-    tokenized_in = [int(t) + len(SpecialTokens) for t in str(example["input"]).split()]
-    tokenized_in = [SpecialTokens.BOS.value] + tokenized_in
-    tokenized_out = [
-        int(t) + len(SpecialTokens) for t in str(example["target"]).split()
-    ]
-    tokenized_out = [SpecialTokens.BOS.value] + tokenized_out
 
-    return {"input": tokenized_in, "target": tokenized_out}
+    PAD = "0"  # Use the group identity token as [PAD]
+    BOS = "[BOS]"
+    UNK = "[UNK]"
+    EOS = "[EOS]"
+    SEP = "[SEP]"
+    CLS = "[CLS]"
+    MASK = "[MASK]"
+
+    @classmethod
+    def values(cls):
+        """Return a list of the string values of each special token."""
+        return list(map(lambda c: c.value, cls))
+
+    @property
+    def index(self):
+        """Return the index of the token in the vocabulary.
+
+        Used to get the index of the PAD token when directly modifying tensors.
+        """
+        return SpecialTokens.values().index(self.value)
 
 
 def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
@@ -70,26 +82,108 @@ def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
 
     Performs channel-wise padding of the inputs and targets.
     """
-    channels = samples[0].keys()
+    # Always pad `input_ids`, only pad `labels` if len(labels) > 1,
+    # never pad `attention_mask`
+    channels_to_pad = ["input_ids", "attention_mask"]
+    if samples[0]["labels"].dim() > 0:
+        channels_to_pad.append("labels")
+
     max_lens = {}
-    for channel in channels:
-        max_lens[channel] = max(
-            [s[channel].shape[0] if s[channel].dim() == 1 else 0 for s in samples]
-        )
+    for c in channels_to_pad:
+        max_lens[c] = max([s[c].shape[0] for s in samples])
 
     for s in samples:
-        for channel in channels:
-            if max_lens[channel] > 0:
-                s[channel] = F.pad(
-                    s[channel],
-                    (0, max_lens[channel] - s[channel].shape[0]),
-                    value=len(SpecialTokens),
-                )
+        for c in channels_to_pad:
+            if max_lens[c] > s[c].shape[0]:
+                if s[c].dtype == torch.bool:
+                    s[c] = F.pad(
+                        s[c],
+                        (0, max_lens[c] - s[c].shape[0]),
+                        value=True,
+                    )
+                else:
+                    bos = s[c][[0]]
+                    rest = s[c][1:]
 
-    collated = {}
-    for channel in channels:
-        collated[channel] = torch.stack([s[channel] for s in samples])
+                    padded_rest = F.pad(
+                        rest,
+                        (0, max_lens[c] - s[c].shape[0]),
+                        value=SpecialTokens.PAD.index,
+                    )
+                    s[c] = torch.cat((bos, padded_rest), dim=0)
+                    # raise RuntimeError("You need to check this works!!")
+
+    # channels = samples[0].keys()
+    # max_lens = {}
+    # for channel in channels:
+    #     max_lens[channel] = max(
+    #         [s[channel].shape[0] if s[channel].dim() == 1 else 0 for s in samples]
+    #     )
+
+    # for s in samples:
+    #     for channel in channels:
+    #         if s[channel].dim() > 0 and max_lens[channel] > s[channel].shape[0]:
+    #             # If the channel is a boolean tensor, then we need to pad with True;
+    #             # otherwise, we need to pad with the index of the PAD token.
+
+    #             if s[channel].dtype == torch.bool:
+    #                 s[channel] = F.pad(
+    #                     s[channel],
+    #                     (0, max_lens[channel] - s[channel].shape[0]),
+    #                     value=True,
+    #                 )
+    #             else:
+    #                 # split off the first token (BOS), pad the rest, then reattach
+    #                 print(s[channel])
+    #                 bos = s[channel][[0]]
+    #                 rest = s[channel][1:]
+    #                 print(bos, rest)
+    #                 padded_rest = F.pad(
+    #                     rest,
+    #                     (0, max_lens[channel] - s[channel].shape[0] - 1),
+    #                     value=SpecialTokens.PAD.index,
+    #                 )
+    #                 s[channel] = torch.cat((bos, padded_rest), dim=0)
+    #                 print(s[channel])
+    #                 raise RuntimeError("You need to check this works!!")
+
+    collated = {
+        "input_ids": torch.stack([s["input_ids"] for s in samples]),
+        "labels": torch.stack([s["labels"] for s in samples]),
+        "attention_mask": torch.ones(
+            (samples[0]["input_ids"].shape[0], samples[0]["input_ids"].shape[0]),
+            dtype=torch.bool,
+        ),
+    }
+
     return collated
+
+
+def tokenize(
+    example: dict[str, Tensor],
+    tokenizer: PreTrainedTokenizerFast,
+    supervised: bool,
+) -> dict[str, Tensor]:
+    """Tokenize inputs."""
+    tokenized = tokenizer(
+        example["input"],
+        return_tensors="pt",
+    )
+
+    # If output is not supervised (e.g., for MLPs) then we only keep the final target
+    # value since its sequence classification, not token classification.
+    tokenized["labels"] = tokenizer(example["target"], return_tensors="pt")["input_ids"]
+    if not supervised:
+        tokenized["labels"] = tokenized["labels"][:, -1]
+
+    # We need to overwrite the attention mask to allow attending to the padding
+    # tokens, since we use the group identity element as padding. We also need
+    # to convert it to a boolean tensor.
+    tokenized["attention_mask"] = torch.ones_like(
+        tokenized["input_ids"], dtype=torch.bool
+    )
+
+    return tokenized
 
 
 def get_dataset(
@@ -98,6 +192,7 @@ def get_dataset(
     k: int | None,
     train_size: float,
     data_dir: str | Path,
+    supervised: bool = True,
 ) -> dict:
     """Construct dataset."""
     assert train_size > 0 and train_size <= 1, "`train_size` must be in (0,1]"
@@ -123,22 +218,48 @@ def get_dataset(
         log.info("Constructing dataset from:")
         log.info("  " + "\n  ".join(map(str, data_paths)))
 
-    # We can find n_vocab just by looking at the k=2 inputs, since this is
-    # guaranteed to contain all the elements in the group.
-    n_vocab = (
+    # All unique tokens can be found by looking at the k=2 inputs. We create a
+    # a dictionary mapping each token to its index in the vocabulary and use this
+    # to construct the tokenizer.
+    unique_tokens = (
         pl.read_csv(data_paths[0])
         .select(pl.col("input").map_batches(lambda x: x.str.split(" ")))
         .explode("input")
-        .unique()
-        .shape[0]
+        .unique()["input"]
+        .to_list()
     )
+    unique_tokens = {t: int(t) for t in unique_tokens}
+
+    tokenizer_base = Tokenizer(WordLevel())
+    tokenizer_base.pre_tokenizer = WhitespaceSplit()
+    tokenizer_base.add_tokens(sorted(list(unique_tokens.keys()), key=lambda x: int(x)))
+    tokenizer_base.add_special_tokens(SpecialTokens.values())
+    tokenizer_base.post_processor = TemplateProcessing(
+        single=f"{SpecialTokens.BOS} $A",
+        special_tokens=[
+            (SpecialTokens.BOS, tokenizer_base.token_to_id(SpecialTokens.BOS))
+        ],
+    )
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=tokenizer_base,
+        bos_token=SpecialTokens.BOS.value,
+        unk_token=SpecialTokens.UNK.value,
+        eos_token=SpecialTokens.EOS.value,
+        sep_token=SpecialTokens.SEP.value,
+        cls_token=SpecialTokens.CLS.value,
+        mask_token=SpecialTokens.MASK.value,
+        pad_token=SpecialTokens.PAD.value,
+    )
+    tokenizer.padding_side = "left"
+    tokenize_map = partial(tokenize, tokenizer=tokenizer, supervised=supervised)
 
     # Construct dataset
     if len(data_paths) == 1:
         dataset = (
             load_dataset("csv", data_files=str(data_paths[0]), split="all")
             .remove_columns(["seed"])
-            .map(tokenize)
+            .map(tokenize_map, batched=True)
+            .remove_columns(["input", "target", "token_type_ids"])
             .with_format(type="torch")
         )
         if train_size < 1:
@@ -147,14 +268,16 @@ def get_dataset(
         pair_data = (
             load_dataset("csv", data_files=str(data_paths[0]), split="all")
             .remove_columns(["seed"])
-            .map(tokenize)
+            .map(tokenize_map, batched=True)
+            .remove_columns(["input", "target", "token_type_ids"])
             .with_format(type="torch")
         )
         long_data = [
             (
                 load_dataset("csv", data_files=str(p), split="all")
                 .remove_columns(["seed"])
-                .map(tokenize)
+                .map(tokenize_map, batched=True)
+                .remove_columns(["input", "target", "token_type_ids"])
                 .with_format(type="torch")
             )
             for p in data_paths[1:]
@@ -167,59 +290,72 @@ def get_dataset(
 
     return {
         "dataset": dataset,
-        "n_vocab": n_vocab + len(SpecialTokens),
+        "tokenizer": tokenizer,
+        "n_vocab": tokenizer_base.get_vocab_size(with_added_tokens=True),
     }
 
 
-def compute_metrics(data: list[(Tensor, Tensor)], prefix: str | None = None) -> dict:
+def compute_metrics(
+    data: list[(Tensor, Tensor)],
+    metric_fns: dict[str, Callable] = {
+        "loss": ce_loss,
+        "token_accuracy": token_accuracy,
+        "sequence_accuracy": sequence_accuracy,
+    },
+    prefix: str | None = None,
+) -> dict:
     """Compute metrics."""
     values_dict = {}
 
+    # Detach tensors from accelerator to get rid of autograd information
     detached_data = [(d[0].cpu().detach(), d[1].cpu().detach()) for d in data]
 
-    seq_len_max = max([d[0].shape[2] for d in detached_data])
-    padded_preds = []
-    padded_tgts = []
-    for d in detached_data:
-        pred, tgt = d
-        pred_pad_size = seq_len_max - pred.shape[2]
-        tgt_pad_size = seq_len_max - tgt.shape[1]
+    if detached_data[0][0].dim() > 2:
+        # Even though each batch has sequences with the same number of tokens,
+        # the seq_len of each batch may be different. We need to pad the predictions
+        # and targets to be the same length before we concatenate them together.
+        seq_len_max = max([d[0].shape[2] for d in detached_data])
+        padded_preds = []
+        padded_tgts = []
+        for d in detached_data:
+            pred, tgt = d
+            pred_pad_size = seq_len_max - pred.shape[2]
+            tgt_pad_size = seq_len_max - tgt.shape[1]
 
-        if pred_pad_size > 0:
-            padding = (pred_pad_size, 0)
-            padded_pred = F.pad(pred[:, :, 1:], padding, value=1)
-            padded_pred = torch.cat((pred[:, :, 0].unsqueeze(-1), padded_pred), dim=-1)
-            padded_preds.append(padded_pred)
-        else:
-            padded_preds.append(pred)
+            if pred_pad_size > 0:
+                padding = (pred_pad_size, 0)
+                padded_pred = F.pad(
+                    # TODO: is this correct? This is logits...what am I padding here??
+                    pred[:, :, 1:],
+                    padding,
+                    value=SpecialTokens.PAD.index,
+                )
+                padded_pred = torch.cat(
+                    (pred[:, :, 0].unsqueeze(-1), padded_pred), dim=-1
+                )
+                padded_preds.append(padded_pred)
+            else:
+                padded_preds.append(pred)
 
-        if tgt_pad_size > 0:
-            padding = (tgt_pad_size, 0)
-            padded_tgt = F.pad(tgt[:, 1:], padding, value=1)
-            padded_tgt = torch.cat((tgt[:, 0].unsqueeze(-1), padded_tgt), dim=-1)
-            padded_tgts.append(padded_tgt)
-        else:
-            padded_tgts.append(tgt)
+            if tgt_pad_size > 0:
+                padding = (tgt_pad_size, 0)
+                padded_tgt = F.pad(tgt[:, 1:], padding, value=SpecialTokens.PAD.index)
+                padded_tgt = torch.cat((tgt[:, 0].unsqueeze(-1), padded_tgt), dim=-1)
+                padded_tgts.append(padded_tgt)
+            else:
+                padded_tgts.append(tgt)
 
-    preds = torch.cat(padded_preds, dim=0)
-    tgts = torch.cat(padded_tgts, dim=0)
+        predicted_logits = torch.cat(padded_preds, dim=0)
+        target_tokens = torch.cat(padded_tgts, dim=0)
+    else:
+        predicted_logits = torch.cat([d[0] for d in detached_data], dim=0)
+        target_tokens = torch.cat([d[1] for d in detached_data], dim=0)
 
-    values_dict["loss"] = F.cross_entropy(preds, tgts).mean().item()
-    values_dict["token_accuracy"] = (
-        torch.eq(preds.argmax(dim=1), tgts).float().mean().item()
-    )
-    values_dict["accuracy"] = (
-        torch.eq(preds.argmax(dim=1), tgts)
-        .float()
-        .sum(dim=1)
-        .div(tgts.shape[1])
-        .floor()
-        .mean()
-        .item()
-    )
-
-    if prefix is not None:
-        values_dict = {f"{prefix}/{k}": v for k, v in values_dict.items()}
+    prefix_str = "" if prefix is None else f"{prefix}/"
+    for metric_name, metric_fn in metric_fns.items():
+        values_dict[prefix_str + metric_name] = metric_fn(
+            predicted_logits, target_tokens
+        )
 
     return values_dict
 
@@ -259,7 +395,14 @@ def train_mlp(
     log.setLevel(log_level)
 
     # Load dataset
-    datadict = get_dataset(group, max_len=None, k=2, train_size=1.0, data_dir=data_dir)
+    datadict = get_dataset(
+        group=group,
+        max_len=None,
+        k=2,
+        train_size=1.0,
+        data_dir=data_dir,
+        supervised=False,
+    )
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
     log.info(f"Dataset: {dataset}")
@@ -294,10 +437,10 @@ def train_mlp(
 
     model = MLPSequenceClassifier(
         d_model=d_model,
-        dim_feedforward=dim_feedforward,
+        d_ff=dim_feedforward,
         activation=activation,
         dropout=dropout,
-        num_layers=num_layers,
+        n_layers=num_layers,
         weight_sharing=weight_sharing,
         weight_scale=weight_scale,
         layer_norm_eps=layer_norm_eps,
@@ -328,10 +471,14 @@ def train_mlp(
         model, optimizer, train_dataloader
     )
 
+    metrics = {
+        "loss": ce_loss,
+        "accuracy": token_accuracy,
+    }
+
     global_step = 0
     for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
         model.train()
-        train_loss = []
         train_metric_data = []
         for batch in (
             t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
@@ -339,24 +486,24 @@ def train_mlp(
             global_step += 1
             optimizer.zero_grad()
 
-            source = batch["input"]
-            target = batch["target"]
+            source = batch["input_ids"]
+            target = batch["labels"]
+
             output = model(source)
 
             loss = F.cross_entropy(output, target)
-            train_loss.append(loss.item())
-
-            predictions, references = accelerator.gather_for_metrics((output, target))
-
-            train_metric_data.append((predictions, references))
-
             accelerator.backward(loss)
             optimizer.step()
 
+            predictions, references = accelerator.gather_for_metrics((output, target))
+            train_metric_data.append((predictions, references))
+
             t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
 
-        train_metrics = compute_metrics(train_metric_data, prefix="train")
-        train_metrics["train/loss"] = np.mean(train_loss)
+        train_metrics = compute_metrics(
+            train_metric_data, metric_fns=metrics, prefix="train"
+        )
+
         n_bar.set_postfix(
             {
                 "loss": f"{train_metrics['train/loss']:.5f}",
@@ -377,12 +524,13 @@ def train(
     max_len: int | None = None,
     k: int | None = None,
     train_split: float = 0.8,
+    supervised: bool = True,
     # Model parameters
     d_model: int = 512,
     nhead: int = 8,
     dim_feedforward: int = 2048,
     dropout: float = 0.1,
-    activation: str = "relu",
+    activation: str = "relu",  # TODO: Make "gelu" default
     layer_norm_eps: float = 1e-5,
     norm_first: bool = False,
     num_layers: int = 1,
@@ -411,7 +559,9 @@ def train(
     log.setLevel(log_level)
 
     # Load dataset
-    datadict = get_dataset(group, max_len, k, train_split, data_dir)
+    datadict = get_dataset(
+        group, max_len, k, train_split, data_dir, supervised=supervised
+    )
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
     log.info(f"Dataset: {dataset}")
@@ -528,9 +678,13 @@ def train(
             global_step += 1
             optimizer.zero_grad()
 
-            source = batch["input"]
-            target = batch["target"]
-            output = model(source)
+            source = batch["input_ids"]
+            mask = batch["attention_mask"]
+            target = batch["labels"]
+
+            # print(source.shape, mask.shape, target.shape)
+
+            output = model(source, mask=mask)
 
             loss = F.cross_entropy(output, target)
 
@@ -553,10 +707,11 @@ def train(
         model.eval()
         eval_data = []
         for batch in tqdm(eval_dataloader, desc="Eval", position=1, leave=False):
-            source = batch["input"]
-            target = batch["target"]
+            source = batch["input_ids"]
+            mask = batch["attention_mask"]
+            target = batch["labels"]
             with torch.no_grad():
-                output = model(source)
+                output = model(source, mask=mask)
 
             predictions, references = accelerator.gather_for_metrics((output, target))
 
@@ -566,7 +721,7 @@ def train(
         accelerator.log(eval_metrics, step=global_step)
         accelerator.log({"epoch": epoch}, step=global_step)
 
-        n_bar.set_postfix({"val/acc": eval_metrics["val/accuracy"]})
+        n_bar.set_postfix({"val/acc": eval_metrics["val/sequence_accuracy"]})
 
     log.info(eval_metrics)
     accelerator.end_training()

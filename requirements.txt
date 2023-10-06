@@ -16,4 +16,5 @@ tokenizers
 torch
 torcheval
 tqdm
+transformers
 wandb
