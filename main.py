@@ -649,7 +649,7 @@ def train(
             optimizer.zero_grad()
 
             source = batch["input_ids"]
-            mask = batch["attention_mask"]
+            batch["attention_mask"]
             target = batch["labels"]
 
             # print(source.shape, mask.shape, target.shape)
@@ -662,7 +662,7 @@ def train(
             # print(f"Target shape: {target.shape}")
             # print(f"Target: {target}")
 
-            output = model(source, mask=mask)
+            output = model(source)
 
             # print(f"Output shape: {output.shape}")
             # print(f"Output: {output}")
@@ -691,10 +691,10 @@ def train(
         eval_data = []
         for batch in tqdm(eval_dataloader, desc="Eval", position=1, leave=False):
             source = batch["input_ids"]
-            mask = batch["attention_mask"]
+            batch["attention_mask"]
             target = batch["labels"]
             with torch.no_grad():
-                output = model(source, mask=mask)
+                output = model(source)
 
             predictions, references = accelerator.gather_for_metrics((output, target))
 
