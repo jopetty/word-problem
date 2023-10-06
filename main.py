@@ -82,8 +82,7 @@ def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
 
     Performs channel-wise padding of the inputs and targets.
     """
-    # Always pad `input_ids`, only pad `labels` if len(labels) > 1,
-    # never pad `attention_mask`
+    # Only pad `labels` if len(labels) > 1,
     channels_to_pad = ["input_ids", "attention_mask"]
     if samples[0]["labels"].dim() > 0:
         channels_to_pad.append("labels")
@@ -98,8 +97,8 @@ def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
                 if s[c].dtype == torch.bool:
                     s[c] = F.pad(
                         s[c],
-                        (0, max_lens[c] - s[c].shape[0]),
-                        value=True,
+                        (max_lens[c] - s[c].shape[0], 0),
+                        value=False,
                     )
                 else:
                     bos = s[c][[0]]
@@ -107,50 +106,20 @@ def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
 
                     padded_rest = F.pad(
                         rest,
-                        (0, max_lens[c] - s[c].shape[0]),
+                        (max_lens[c] - s[c].shape[0], 0),
                         value=SpecialTokens.PAD.index,
                     )
+                    # padded = torch.cat((bos, padded_rest), dim=0)
+                    # print(s[c])
+                    # print(padded)
+
                     s[c] = torch.cat((bos, padded_rest), dim=0)
                     # raise RuntimeError("You need to check this works!!")
-
-    # channels = samples[0].keys()
-    # max_lens = {}
-    # for channel in channels:
-    #     max_lens[channel] = max(
-    #         [s[channel].shape[0] if s[channel].dim() == 1 else 0 for s in samples]
-    #     )
-
-    # for s in samples:
-    #     for channel in channels:
-    #         if s[channel].dim() > 0 and max_lens[channel] > s[channel].shape[0]:
-    #             # If the channel is a boolean tensor, then we need to pad with True;
-    #             # otherwise, we need to pad with the index of the PAD token.
-
-    #             if s[channel].dtype == torch.bool:
-    #                 s[channel] = F.pad(
-    #                     s[channel],
-    #                     (0, max_lens[channel] - s[channel].shape[0]),
-    #                     value=True,
-    #                 )
-    #             else:
-    #                 # split off the first token (BOS), pad the rest, then reattach
-    #                 print(s[channel])
-    #                 bos = s[channel][[0]]
-    #                 rest = s[channel][1:]
-    #                 print(bos, rest)
-    #                 padded_rest = F.pad(
-    #                     rest,
-    #                     (0, max_lens[channel] - s[channel].shape[0] - 1),
-    #                     value=SpecialTokens.PAD.index,
-    #                 )
-    #                 s[channel] = torch.cat((bos, padded_rest), dim=0)
-    #                 print(s[channel])
-    #                 raise RuntimeError("You need to check this works!!")
 
     collated = {
         "input_ids": torch.stack([s["input_ids"] for s in samples]),
         "labels": torch.stack([s["labels"] for s in samples]),
-        "attention_mask": torch.ones(
+        "attention_mask": torch.zeros(
             (samples[0]["input_ids"].shape[0], samples[0]["input_ids"].shape[0]),
             dtype=torch.bool,
         ),
@@ -179,7 +148,7 @@ def tokenize(
     # We need to overwrite the attention mask to allow attending to the padding
     # tokens, since we use the group identity element as padding. We also need
     # to convert it to a boolean tensor.
-    tokenized["attention_mask"] = torch.ones_like(
+    tokenized["attention_mask"] = torch.zeros_like(
         tokenized["input_ids"], dtype=torch.bool
     )
 
@@ -260,7 +229,6 @@ def get_dataset(
             .remove_columns(["seed"])
             .map(tokenize_map, batched=True)
             .remove_columns(["input", "target", "token_type_ids"])
-            .with_format(type="torch")
         )
         if train_size < 1:
             dataset = dataset.train_test_split(train_size=train_size)
@@ -270,7 +238,6 @@ def get_dataset(
             .remove_columns(["seed"])
             .map(tokenize_map, batched=True)
             .remove_columns(["input", "target", "token_type_ids"])
-            .with_format(type="torch")
         )
         long_data = [
             (
@@ -278,7 +245,6 @@ def get_dataset(
                 .remove_columns(["seed"])
                 .map(tokenize_map, batched=True)
                 .remove_columns(["input", "target", "token_type_ids"])
-                .with_format(type="torch")
             )
             for p in data_paths[1:]
         ]
@@ -289,7 +255,7 @@ def get_dataset(
         dataset["train"] = concatenate_datasets([dataset["train"], pair_data])
 
     return {
-        "dataset": dataset,
+        "dataset": dataset.with_format("torch"),
         "tokenizer": tokenizer,
         "n_vocab": tokenizer_base.get_vocab_size(with_added_tokens=True),
     }
@@ -324,15 +290,18 @@ def compute_metrics(
 
             if pred_pad_size > 0:
                 padding = (pred_pad_size, 0)
-                padded_pred = F.pad(
-                    # TODO: is this correct? This is logits...what am I padding here??
-                    pred[:, :, 1:],
-                    padding,
-                    value=SpecialTokens.PAD.index,
-                )
-                padded_pred = torch.cat(
-                    (pred[:, :, 0].unsqueeze(-1), padded_pred), dim=-1
-                )
+                pad_logits = torch.ones_like(pred[:, :, [0]]) * float("-inf")
+                pad_logits[:, SpecialTokens.PAD.index, :] = 1.0
+
+                bos = pred[:, :, [0]]
+                rest = pred[:, :, 1:]
+
+                for _ in range(pred_pad_size):
+                    rest = torch.cat((pad_logits, rest), dim=-1)
+
+                padded_pred = torch.cat((bos, rest), dim=-1)
+                print(padded_pred)
+                print(padded_pred.argmax(dim=1))
                 padded_preds.append(padded_pred)
             else:
                 padded_preds.append(pred)
@@ -340,7 +309,8 @@ def compute_metrics(
             if tgt_pad_size > 0:
                 padding = (tgt_pad_size, 0)
                 padded_tgt = F.pad(tgt[:, 1:], padding, value=SpecialTokens.PAD.index)
-                padded_tgt = torch.cat((tgt[:, 0].unsqueeze(-1), padded_tgt), dim=-1)
+                padded_tgt = torch.cat((tgt[:, [0]], padded_tgt), dim=-1)
+                print(padded_tgt)
                 padded_tgts.append(padded_tgt)
             else:
                 padded_tgts.append(tgt)
@@ -683,8 +653,21 @@ def train(
             target = batch["labels"]
 
             # print(source.shape, mask.shape, target.shape)
+            # print(f"Source shape: {source.shape}")
+            # print(f"Source: {source}")
+
+            # print(f"Mask shape: {mask.shape}")
+            # print(f"Mask: {mask}")
+
+            # print(f"Target shape: {target.shape}")
+            # print(f"Target: {target}")
 
             output = model(source, mask=mask)
+
+            # print(f"Output shape: {output.shape}")
+            # print(f"Output: {output}")
+
+            # raise SystemExit
 
             loss = F.cross_entropy(output, target)
 
@@ -693,8 +676,8 @@ def train(
             train_data.append((predictions, references))
 
             if np.random.random_sample() < 0.01:
-                print(f"preds: {predictions.argmax(dim=1)}")
-                print(f"trgts: {references}")
+                log.debug(f"preds: {predictions.argmax(dim=1)}")
+                log.debug(f"trgts: {references}")
 
             accelerator.backward(loss)
             optimizer.step()
@@ -721,7 +704,7 @@ def train(
         accelerator.log(eval_metrics, step=global_step)
         accelerator.log({"epoch": epoch}, step=global_step)
 
-        n_bar.set_postfix({"val/acc": eval_metrics["val/sequence_accuracy"]})
+        n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
 
     log.info(eval_metrics)
     accelerator.end_training()
