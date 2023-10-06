@@ -52,9 +52,20 @@ class TestData(unittest.TestCase):  # noqa: D101
         self.assertEqual(collated_batch["input_ids"].shape, (3, 6))
         self.assertEqual(collated_batch["labels"].shape, (3, 6))
 
-        self.assertEqual(collated_batch["input_ids"][0, 0], 7)
+        # check that the first tokens have been preserved
+        for seq in range(collated_batch["input_ids"].shape[0]):
+            self.assertEqual(
+                collated_batch["input_ids"][seq, 0], batch[seq]["input_ids"][0]
+            )
+
+        # check that the last tokens have been preserved
+        for seq in range(collated_batch["input_ids"].shape[0]):
+            self.assertEqual(
+                collated_batch["input_ids"][seq, -1], batch[seq]["input_ids"][-1]
+            )
+
+        # check that padding has been applied
         self.assertEqual(collated_batch["input_ids"][0, 1], 0)
-        self.assertEqual(collated_batch["input_ids"][0, -1], 3)
 
     def test_load_supervised_data(self):  # noqa: D102
         _ = Accelerator()
