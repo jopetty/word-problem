@@ -109,12 +109,8 @@ def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
                         (max_lens[c] - s[c].shape[0], 0),
                         value=SpecialTokens.PAD.index,
                     )
-                    # padded = torch.cat((bos, padded_rest), dim=0)
-                    # print(s[c])
-                    # print(padded)
 
                     s[c] = torch.cat((bos, padded_rest), dim=0)
-                    # raise RuntimeError("You need to check this works!!")
 
     collated = {
         "input_ids": torch.stack([s["input_ids"] for s in samples]),
@@ -300,8 +296,8 @@ def compute_metrics(
                     rest = torch.cat((pad_logits, rest), dim=-1)
 
                 padded_pred = torch.cat((bos, rest), dim=-1)
-                print(padded_pred)
-                print(padded_pred.argmax(dim=1))
+                log.debug(padded_pred)
+                log.debug(padded_pred.argmax(dim=1))
                 padded_preds.append(padded_pred)
             else:
                 padded_preds.append(pred)
@@ -500,7 +496,7 @@ def train(
     nhead: int = 8,
     dim_feedforward: int = 2048,
     dropout: float = 0.1,
-    activation: str = "relu",  # TODO: Make "gelu" default
+    activation: str = "gelu",
     layer_norm_eps: float = 1e-5,
     norm_first: bool = False,
     num_layers: int = 1,
@@ -652,22 +648,7 @@ def train(
             batch["attention_mask"]
             target = batch["labels"]
 
-            # print(source.shape, mask.shape, target.shape)
-            # print(f"Source shape: {source.shape}")
-            # print(f"Source: {source}")
-
-            # print(f"Mask shape: {mask.shape}")
-            # print(f"Mask: {mask}")
-
-            # print(f"Target shape: {target.shape}")
-            # print(f"Target: {target}")
-
             output = model(source)
-
-            # print(f"Output shape: {output.shape}")
-            # print(f"Output: {output}")
-
-            # raise SystemExit
 
             loss = F.cross_entropy(output, target)
 
