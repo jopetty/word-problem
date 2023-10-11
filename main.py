@@ -19,9 +19,10 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from datasets import concatenate_datasets, load_dataset
 from dotenv import load_dotenv
+from ordered_set import OrderedSet
 from sfirah.metrics import ce_loss, sequence_accuracy, token_accuracy
 from sfirah.mlp import MLPSequenceClassifier
-from sfirah.transformers import EncoderTokenClassifier
+from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifier
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import WhitespaceSplit
@@ -55,7 +56,7 @@ class SpecialTokens(StrEnum):
     that they are missing.
     """
 
-    PAD = "0"  # Use the group identity token as [PAD]
+    PAD = "[PAD]"
     BOS = "[BOS]"
     UNK = "[UNK]"
     EOS = "[EOS]"
@@ -77,13 +78,15 @@ class SpecialTokens(StrEnum):
         return SpecialTokens.values().index(self.value)
 
 
-def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
+def pad_collate(
+    samples: list[dict[str, Tensor]], tokenizer: PreTrainedTokenizerFast
+) -> dict[str, Tensor]:
     """Collate function for DataLoader.
 
     Performs channel-wise padding of the inputs and targets.
     """
     # Only pad `labels` if len(labels) > 1,
-    channels_to_pad = ["input_ids", "attention_mask"]
+    channels_to_pad = ["input_ids"]
     if samples[0]["labels"].dim() > 0:
         channels_to_pad.append("labels")
 
@@ -94,23 +97,9 @@ def pad_collate(samples: list[dict[str, Tensor]]) -> dict[str, Tensor]:
     for s in samples:
         for c in channels_to_pad:
             if max_lens[c] > s[c].shape[0]:
-                if s[c].dtype == torch.bool:
-                    s[c] = F.pad(
-                        s[c],
-                        (max_lens[c] - s[c].shape[0], 0),
-                        value=False,
-                    )
-                else:
-                    bos = s[c][[0]]
-                    rest = s[c][1:]
-
-                    padded_rest = F.pad(
-                        rest,
-                        (max_lens[c] - s[c].shape[0], 0),
-                        value=SpecialTokens.PAD.index,
-                    )
-
-                    s[c] = torch.cat((bos, padded_rest), dim=0)
+                s[c] = F.pad(
+                    s[c], (0, max_lens[c] - s[c].shape[0]), value=tokenizer.pad_token_id
+                )
 
     collated = {
         "input_ids": torch.stack([s["input_ids"] for s in samples]),
@@ -134,19 +123,13 @@ def tokenize(
         example["input"],
         return_tensors="pt",
     )
+    tokenized.pop("attention_mask", None)
 
     # If output is not supervised (e.g., for MLPs) then we only keep the final target
     # value since its sequence classification, not token classification.
     tokenized["labels"] = tokenizer(example["target"], return_tensors="pt")["input_ids"]
     if not supervised:
         tokenized["labels"] = tokenized["labels"][:, -1]
-
-    # We need to overwrite the attention mask to allow attending to the padding
-    # tokens, since we use the group identity element as padding. We also need
-    # to convert it to a boolean tensor.
-    tokenized["attention_mask"] = torch.zeros_like(
-        tokenized["input_ids"], dtype=torch.bool
-    )
 
     return tokenized
 
@@ -159,7 +142,10 @@ def get_dataset(
     data_dir: str | Path,
     supervised: bool = True,
 ) -> dict:
-    """Construct dataset."""
+    """Construct dataset.
+
+    TODO: `max_len` should be changed into a boolean `strict_length` flag
+    """
     assert train_size > 0 and train_size <= 1, "`train_size` must be in (0,1]"
 
     if not ((k is None) ^ (max_len is None)):
@@ -171,13 +157,13 @@ def get_dataset(
         if not data_paths[0].exists():
             raise FileNotFoundError(f"You must have data for {group}={2}.")
         data_paths = [p for p in data_paths if p.exists()]
-        data_paths = list(set(data_paths))
+        data_paths = list(OrderedSet(data_paths))
         log.info("Constructing dataset from:")
         log.info("  " + "\n  ".join(map(str, data_paths)))
     else:
         assert k > 1, "`k` must be at least 2"
         data_paths = [data_dir / f"{group}={i}.csv" for i in [2, k]]
-        data_paths = list(set(data_paths))
+        data_paths = list(OrderedSet(data_paths))
         if not data_paths[0].exists():
             raise FileNotFoundError(f"You must have data for {group}={2}.")
         log.info("Constructing dataset from:")
@@ -235,20 +221,18 @@ def get_dataset(
             .map(tokenize_map, batched=True)
             .remove_columns(["input", "target", "token_type_ids"])
         )
-        long_data = [
-            (
-                load_dataset("csv", data_files=str(p), split="all")
-                .remove_columns(["seed"])
-                .map(tokenize_map, batched=True)
-                .remove_columns(["input", "target", "token_type_ids"])
-            )
-            for p in data_paths[1:]
-        ]
-
-        dataset = concatenate_datasets(long_data).train_test_split(
-            train_size=train_size
+        long_data = (
+            load_dataset("csv", data_files=map(str, data_paths[1:]), split="all")
+            .remove_columns(["seed"])
+            .map(tokenize_map, batched=True)
+            .remove_columns(["input", "target", "token_type_ids"])
         )
-        dataset["train"] = concatenate_datasets([dataset["train"], pair_data])
+
+        if train_size < 1:
+            dataset = long_data.train_test_split(train_size=train_size)
+            dataset["train"] = concatenate_datasets([dataset["train"], pair_data])
+        else:
+            dataset = concatenate_datasets([long_data, pair_data])
 
     return {
         "dataset": dataset.with_format("torch"),
@@ -257,8 +241,51 @@ def get_dataset(
     }
 
 
+def detach_and_pad(
+    data: list[(Tensor, Tensor)], pad_token_id: int
+) -> dict[str, Tensor]:
+    """Detach tensors from accelerator and pad them to be the same length."""
+    preds = [d[0].cpu().detach() for d in data]
+    tgts = [d[1].cpu().detach() for d in data]
+
+    max_pred_len = max([p.shape[-1] for p in preds])
+    min_pred_len = min([p.shape[-1] for p in preds])
+    max_tgt_len = max([t.shape[-1] for t in tgts])
+    min_tgt_len = min([t.shape[-1] for t in tgts])
+
+    if max_pred_len != min_pred_len:
+        for idx, p in enumerate(preds):
+            pred_pad_size = max_pred_len - p.shape[-1]
+            if pred_pad_size > 1:
+                padding_logits = torch.ones_like([p[:, :, [0]]]) * float("-inf")
+                padding_logits[:, pad_token_id, :] = 1.0
+
+                padding_logits = torch.cat([padding_logits] * pred_pad_size, dim=-1)
+                print(padding_logits.shape)
+
+                for _ in range(pred_pad_size):
+                    p = torch.cat((padding_logits, p), dim=-1)
+
+                preds[idx] = p
+
+    # if targets are single values per sequence (i.e., non-supervised) then we
+    # don't need to worry about padding anything
+    if (max_tgt_len != min_tgt_len) and (tgts[0].dim() > 1):
+        for idx, t in enumerate(tgts):
+            tgt_pad_size = max_tgt_len - t.shape[-1]
+            if tgt_pad_size > 1:
+                t = F.pad(t, (tgt_pad_size, 0), mode="constant", value=pad_token_id)
+                tgts[idx] = t
+
+    preds = torch.cat(preds, dim=0)
+    tgts = torch.cat(tgts, dim=0)
+
+    return {"predictions": preds, "targets": tgts}
+
+
 def compute_metrics(
     data: list[(Tensor, Tensor)],
+    tokenizer: PreTrainedTokenizerFast,
     metric_fns: dict[str, Callable] = {
         "loss": ce_loss,
         "token_accuracy": token_accuracy,
@@ -269,58 +296,62 @@ def compute_metrics(
     """Compute metrics."""
     values_dict = {}
 
-    # Detach tensors from accelerator to get rid of autograd information
-    detached_data = [(d[0].cpu().detach(), d[1].cpu().detach()) for d in data]
+    data = detach_and_pad(data, pad_token_id=tokenizer.pad_token_id)
+    predicted_logits = data["predictions"]
+    target_tokens = data["targets"]
 
-    if detached_data[0][0].dim() > 2:
-        # Even though each batch has sequences with the same number of tokens,
-        # the seq_len of each batch may be different. We need to pad the predictions
-        # and targets to be the same length before we concatenate them together.
-        seq_len_max = max([d[0].shape[2] for d in detached_data])
-        padded_preds = []
-        padded_tgts = []
-        for d in detached_data:
-            pred, tgt = d
-            pred_pad_size = seq_len_max - pred.shape[2]
-            tgt_pad_size = seq_len_max - tgt.shape[1]
+    # # Detach tensors from accelerator to get rid of autograd information
+    # detached_data = [(d[0].cpu().detach(), d[1].cpu().detach()) for d in data]
 
-            if pred_pad_size > 0:
-                padding = (pred_pad_size, 0)
-                pad_logits = torch.ones_like(pred[:, :, [0]]) * float("-inf")
-                pad_logits[:, SpecialTokens.PAD.index, :] = 1.0
+    # if detached_data[0][0].dim() > 2:
+    #     # Even though each batch has sequences with the same number of tokens,
+    #     # the seq_len of each batch may be different. We need to pad the predictions
+    #     # and targets to be the same length before we concatenate them together.
+    #     seq_len_max = max([d[0].shape[2] for d in detached_data])
+    #     padded_preds = []
+    #     padded_tgts = []
+    #     for d in detached_data:
+    #         pred, tgt = d
+    #         pred_pad_size = seq_len_max - pred.shape[2]
+    #         tgt_pad_size = seq_len_max - tgt.shape[1]
 
-                bos = pred[:, :, [0]]
-                rest = pred[:, :, 1:]
+    #         if pred_pad_size > 0:
+    #             padding = (pred_pad_size, 0)
+    #             pad_logits = torch.ones_like(pred[:, :, [0]]) * float("-inf")
+    #             pad_logits[:, tokenizer.pad_token_id, :] = 1.0
 
-                for _ in range(pred_pad_size):
-                    rest = torch.cat((pad_logits, rest), dim=-1)
+    #             bos = pred[:, :, [0]]
+    #             rest = pred[:, :, 1:]
 
-                padded_pred = torch.cat((bos, rest), dim=-1)
-                log.debug(padded_pred)
-                log.debug(padded_pred.argmax(dim=1))
-                padded_preds.append(padded_pred)
-            else:
-                padded_preds.append(pred)
+    #             for _ in range(pred_pad_size):
+    #                 rest = torch.cat((pad_logits, rest), dim=-1)
 
-            if tgt_pad_size > 0:
-                padding = (tgt_pad_size, 0)
-                padded_tgt = F.pad(tgt[:, 1:], padding, value=SpecialTokens.PAD.index)
-                padded_tgt = torch.cat((tgt[:, [0]], padded_tgt), dim=-1)
-                print(padded_tgt)
-                padded_tgts.append(padded_tgt)
-            else:
-                padded_tgts.append(tgt)
+    #             padded_pred = torch.cat((bos, rest), dim=-1)
+    #             log.debug(padded_pred)
+    #             log.debug(padded_pred.argmax(dim=1))
+    #             padded_preds.append(padded_pred)
+    #         else:
+    #             padded_preds.append(pred)
 
-        predicted_logits = torch.cat(padded_preds, dim=0)
-        target_tokens = torch.cat(padded_tgts, dim=0)
-    else:
-        predicted_logits = torch.cat([d[0] for d in detached_data], dim=0)
-        target_tokens = torch.cat([d[1] for d in detached_data], dim=0)
+    #         if tgt_pad_size > 0:
+    #             padding = (tgt_pad_size, 0)
+    #             padded_tgt = F.pad(tgt[:, 1:], padding, value=tokenizer.pad_token_id)
+    #             padded_tgt = torch.cat((tgt[:, [0]], padded_tgt), dim=-1)
+    #             print(padded_tgt)
+    #             padded_tgts.append(padded_tgt)
+    #         else:
+    #             padded_tgts.append(tgt)
+
+    #     predicted_logits = torch.cat(padded_preds, dim=0)
+    #     target_tokens = torch.cat(padded_tgts, dim=0)
+    # else:
+    #     predicted_logits = torch.cat([d[0] for d in detached_data], dim=0)
+    #     target_tokens = torch.cat([d[1] for d in detached_data], dim=0)
 
     prefix_str = "" if prefix is None else f"{prefix}/"
     for metric_name, metric_fn in metric_fns.items():
         values_dict[prefix_str + metric_name] = metric_fn(
-            predicted_logits, target_tokens
+            predicted_logits, target_tokens, tokenizer.pad_token_id
         )
 
     return values_dict
@@ -371,6 +402,7 @@ def train_mlp(
     )
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
+    pad_token_id = datadict["tokenizer"].pad_token_id
     log.info(f"Dataset: {dataset}")
 
     # Set up logger
@@ -457,7 +489,7 @@ def train_mlp(
 
             output = model(source)
 
-            loss = F.cross_entropy(output, target)
+            loss = F.cross_entropy(output, target, ignore_index=pad_token_id)
             accelerator.backward(loss)
             optimizer.step()
 
@@ -489,7 +521,7 @@ def train(
     data_dir: Path = PROJECT_ROOT / "data",
     max_len: int | None = None,
     k: int | None = None,
-    train_split: float = 0.8,
+    train_size: float = 0.8,
     supervised: bool = True,
     # Model parameters
     d_model: int = 512,
@@ -499,7 +531,7 @@ def train(
     activation: str = "gelu",
     layer_norm_eps: float = 1e-5,
     norm_first: bool = False,
-    num_layers: int = 1,
+    n_layers: int = 1,
     weight_sharing: bool = False,
     weight_scale: float = 1.0,
     bias: bool = True,
@@ -526,15 +558,17 @@ def train(
 
     # Load dataset
     datadict = get_dataset(
-        group, max_len, k, train_split, data_dir, supervised=supervised
+        group, max_len, k, train_size, data_dir, supervised=supervised
     )
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
-    log.info(f"Dataset: {dataset}")
+    tokenizer = datadict["tokenizer"]
+    collate_fn = partial(pad_collate, tokenizer=tokenizer)
 
     # Set up logger
     project_hps = {
         "max_len": max_len,
+        "k": k,
         "group": group,
         "d_model": d_model,
         "compile": compile,
@@ -544,7 +578,7 @@ def train(
         "activation": activation,
         "layer_norm_eps": layer_norm_eps,
         "norm_first": norm_first,
-        "num_layers": num_layers,
+        "num_layers": n_layers,
         "weight_sharing": weight_sharing,
         "weight_scale": weight_scale,
         "bias": bias,
@@ -556,30 +590,53 @@ def train(
         "eps": op_eps,
         "weight_decay": weight_decay,
         "seed": seed,
+        "train_size": train_size,
+        "supervised": supervised,
     }
-    log.info(f"Config: {pformat(project_hps)}")
 
     accelerator.init_trackers(
         project_name,
         config=project_hps,
     )
 
+    log.info(f"Config: {pformat(project_hps)}")
+    log.info(f"Dataset: {dataset}")
+
     # Construct model
-    model = EncoderTokenClassifier(
-        d_model=d_model,
-        n_heads=nhead,
-        d_ff=dim_feedforward,
-        dropout=dropout,
-        activation=activation,
-        layer_norm_eps=layer_norm_eps,
-        norm_first=norm_first,
-        n_layers=num_layers,
-        weight_sharing=weight_sharing,
-        weight_scale=weight_scale,
-        n_vocab=n_vocab,
-        batch_first=True,
-        bias=bias,
-    )
+    if supervised:
+        model = EncoderTokenClassifier(
+            d_model=d_model,
+            n_heads=nhead,
+            d_ff=dim_feedforward,
+            dropout=dropout,
+            activation=activation,
+            layer_norm_eps=layer_norm_eps,
+            norm_first=norm_first,
+            n_layers=n_layers,
+            weight_sharing=weight_sharing,
+            weight_scale=weight_scale,
+            n_vocab=n_vocab,
+            batch_first=True,
+            bias=bias,
+        )
+    else:
+        model = EncoderSequenceClassifier(
+            cl_dim=1,
+            cl_index=0,
+            d_model=d_model,
+            n_heads=nhead,
+            d_ff=dim_feedforward,
+            dropout=dropout,
+            activation=activation,
+            layer_norm_eps=layer_norm_eps,
+            norm_first=norm_first,
+            n_layers=n_layers,
+            weight_sharing=weight_sharing,
+            weight_scale=weight_scale,
+            n_vocab=n_vocab,
+            batch_first=True,
+            bias=bias,
+        )
 
     if compile:
         log.info("Compiling model...")
@@ -603,36 +660,45 @@ def train(
         eps=op_eps,
         weight_decay=weight_decay,
     )
-    if train_split < 1:
+    if train_size < 1:
         train_dataloader = DataLoader(
             dataset["train"],
             shuffle=True,
             batch_size=batch_size,
-            collate_fn=pad_collate,
+            collate_fn=collate_fn,
         )
         eval_dataloader = DataLoader(
             dataset["test"],
             shuffle=False,
             batch_size=batch_size,
-            collate_fn=pad_collate,
+            collate_fn=collate_fn,
         )
     else:
         train_dataloader = DataLoader(
             dataset,
             shuffle=True,
             batch_size=batch_size,
-            collate_fn=pad_collate,
+            collate_fn=collate_fn,
         )
         eval_dataloader = DataLoader(
             dataset,
             shuffle=True,
             batch_size=batch_size,
-            collate_fn=pad_collate,
+            collate_fn=collate_fn,
         )
 
     model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
         model, optimizer, train_dataloader, eval_dataloader
     )
+
+    metric_fns = {
+        "loss": ce_loss,
+        "sequence_accuracy": token_accuracy,
+    }
+
+    if supervised:
+        metric_fns["sequence_accuracy"] = sequence_accuracy
+        metric_fns["token_accuracy"] = token_accuracy
 
     global_step = 0
     for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
@@ -665,7 +731,9 @@ def train(
 
             t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
 
-        train_metrics = compute_metrics(train_data, prefix="train")
+        train_metrics = compute_metrics(
+            train_data, prefix="train", tokenizer=tokenizer, metric_fns=metric_fns
+        )
         accelerator.log(train_metrics, step=global_step)
 
         model.eval()
@@ -681,7 +749,9 @@ def train(
 
             eval_data.append((predictions, references))
 
-        eval_metrics = compute_metrics(eval_data, prefix="val")
+        eval_metrics = compute_metrics(
+            eval_data, prefix="val", tokenizer=tokenizer, metric_fns=metric_fns
+        )
         accelerator.log(eval_metrics, step=global_step)
         accelerator.log({"epoch": epoch}, step=global_step)
 
