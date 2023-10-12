@@ -9,7 +9,6 @@ from pprint import pformat
 from random import randint
 
 import fire
-import numpy as np
 import polars as pl
 import pyrootutils
 import torch
@@ -246,24 +245,22 @@ def detach_and_pad(
     preds = [d[0].cpu().detach() for d in data]
     tgts = [d[1].cpu().detach() for d in data]
 
-    max_pred_len = max([p.shape[-1] for p in preds])
-    min_pred_len = min([p.shape[-1] for p in preds])
+    max_pred_len = max([p.shape[1] for p in preds])
+    min_pred_len = min([p.shape[1] for p in preds])
     max_tgt_len = max([t.shape[-1] for t in tgts])
     min_tgt_len = min([t.shape[-1] for t in tgts])
 
     if max_pred_len != min_pred_len:
         for idx, p in enumerate(preds):
-            pred_pad_size = max_pred_len - p.shape[-1]
+            pred_pad_size = max_pred_len - p.shape[1]
             if pred_pad_size > 0:
-                print(p)
-                padding_logits = torch.ones_like(p[:, :, [0]]) * float("-inf")
-                padding_logits[:, pad_token_id, :] = 1.0
+                padding_logits = torch.ones_like(p[:, [0], :]) * float("-inf")
+                padding_logits[:, :, pad_token_id] = 1.0
 
-                padding_logits = torch.cat([padding_logits] * pred_pad_size, dim=-1)
-                print(padding_logits.shape)
+                padding_logits = torch.cat([padding_logits] * pred_pad_size, dim=1)
 
                 for _ in range(pred_pad_size):
-                    p = torch.cat((padding_logits, p), dim=-1)
+                    p = torch.cat((padding_logits, p), dim=1)
 
                 preds[idx] = p
 
@@ -476,7 +473,7 @@ def train(
     max_len: int | None = None,
     k: int | None = None,
     train_size: float = 0.8,
-    supervised: bool = True,
+    tagging: bool = True,
     # Model parameters
     d_model: int = 512,
     nhead: int = 8,
@@ -498,6 +495,7 @@ def train(
     op_eps: float = 1e-8,
     weight_decay: float = 0.01,
     compile: bool = False,
+    causal: bool = True,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
@@ -511,9 +509,7 @@ def train(
     log.setLevel(log_level)
 
     # Load dataset
-    datadict = get_dataset(
-        group, max_len, k, train_size, data_dir, supervised=supervised
-    )
+    datadict = get_dataset(group, max_len, k, train_size, data_dir, supervised=tagging)
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
     tokenizer = datadict["tokenizer"]
@@ -521,31 +517,32 @@ def train(
 
     # Set up logger
     project_hps = {
-        "max_len": max_len,
-        "k": k,
-        "group": group,
-        "d_model": d_model,
+        "activation": activation,
+        "batch_size": batch_size,
+        "betas": (beta1, beta2),
+        "bias": bias,
+        "causal": causal,
         "compile": compile,
-        "nhead": nhead,
+        "d_model": d_model,
         "dim_feedforward": dim_feedforward,
         "dropout": dropout,
-        "activation": activation,
+        "epochs": epochs,
+        "eps": op_eps,
+        "group": group,
+        "k": k,
         "layer_norm_eps": layer_norm_eps,
+        "lr": lr,
+        "max_len": max_len,
+        "nhead": nhead,
         "norm_first": norm_first,
         "num_layers": n_layers,
-        "weight_sharing": weight_sharing,
-        "weight_scale": weight_scale,
-        "bias": bias,
         "n_vocab": n_vocab,
-        "epochs": epochs,
-        "batch_size": batch_size,
-        "lr": lr,
-        "betas": (beta1, beta2),
-        "eps": op_eps,
-        "weight_decay": weight_decay,
         "seed": seed,
+        "tagging": tagging,
         "train_size": train_size,
-        "supervised": supervised,
+        "weight_decay": weight_decay,
+        "weight_scale": weight_scale,
+        "weight_sharing": weight_sharing,
     }
 
     accelerator.init_trackers(
@@ -557,7 +554,7 @@ def train(
     log.info(f"Dataset: {dataset}")
 
     # Construct model
-    if supervised:
+    if tagging:
         model = EncoderTokenClassifier(
             d_model=d_model,
             n_heads=nhead,
@@ -650,7 +647,7 @@ def train(
         "sequence_accuracy": token_accuracy,
     }
 
-    if supervised:
+    if tagging:
         metric_fns["sequence_accuracy"] = sequence_accuracy
         metric_fns["token_accuracy"] = token_accuracy
 
@@ -668,16 +665,23 @@ def train(
             batch["attention_mask"]
             target = batch["labels"]
 
-            output = model(source)
-
-            loss = F.cross_entropy(output, target)
+            if causal:
+                mask = torch.nn.Transformer.generate_square_subsequent_mask(
+                    source.shape[1], device=device
+                )
+                output = model(source, mask=mask, is_causal=True)
+            else:
+                output = model(source)
 
             predictions, references = accelerator.gather_for_metrics((output, target))
-
             train_data.append((predictions, references))
 
-            if np.random.random_sample() < 0.01:
-                log.debug(f"preds: {predictions.argmax(dim=1)}")
+            target = target.flatten()
+            output = output.flatten(end_dim=-2)
+            loss = F.cross_entropy(output, target)
+
+            if global_step % 100 == 0:
+                log.debug(f"preds: {predictions.argmax(dim=-1)}")
                 log.debug(f"trgts: {references}")
 
             accelerator.backward(loss)
