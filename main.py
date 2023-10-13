@@ -701,7 +701,13 @@ def train(
             batch["attention_mask"]
             target = batch["labels"]
             with torch.no_grad():
-                output = model(source)
+                if causal:
+                    mask = torch.nn.Transformer.generate_square_subsequent_mask(
+                        source.shape[1], device=device
+                    )
+                    output = model(source, mask=mask, is_causal=True)
+                else:
+                    output = model(source)
 
             predictions, references = accelerator.gather_for_metrics((output, target))
 
