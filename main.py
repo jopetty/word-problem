@@ -101,10 +101,6 @@ def pad_collate(
     collated = {
         "input_ids": torch.stack([s["input_ids"] for s in samples]),
         "labels": torch.stack([s["labels"] for s in samples]),
-        "attention_mask": torch.zeros(
-            (samples[0]["input_ids"].shape[0], samples[0]["input_ids"].shape[0]),
-            dtype=torch.bool,
-        ),
     }
 
     return collated
@@ -662,7 +658,6 @@ def train(
             optimizer.zero_grad()
 
             source = batch["input_ids"]
-            batch["attention_mask"]
             target = batch["labels"]
 
             if causal:
@@ -698,7 +693,6 @@ def train(
         eval_data = []
         for batch in tqdm(eval_dataloader, desc="Eval", position=1, leave=False):
             source = batch["input_ids"]
-            batch["attention_mask"]
             target = batch["labels"]
             with torch.no_grad():
                 if causal:
