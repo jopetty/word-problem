@@ -2,7 +2,7 @@
 
 import os
 import random
-from functools import partial, reduce
+from functools import reduce
 from itertools import product
 from pathlib import Path
 
@@ -96,11 +96,13 @@ def main(
 
     examples = []
     for seq in sequences:
+        acc = 0
+        scanned = [acc := group_reduce(lhs=acc, rhs=x, G=group_prod) for x in seq]
         examples.append(
             {
-                "length": k,
+                "seed": seed,
                 "input": " ".join(map(str, seq)),
-                "target": str(reduce(partial(group_reduce, G=group_prod), seq)),
+                "target": " ".join(map(str, scanned)),
             }
         )
     ex_df = pl.from_dicts(examples)
