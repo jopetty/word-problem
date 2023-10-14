@@ -458,8 +458,8 @@ def train_mlp(
 def train(
     # Data parameters
     group: str,
+    k: int,
     data_dir: Path = PROJECT_ROOT / "data",
-    k: int = 3,
     strict_len: bool = True,
     train_size: float = 0.8,
     tagging: bool = True,
