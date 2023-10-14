@@ -31,7 +31,7 @@ python main.py train --group S5 --k 4
 python main.py train --group S5 --k 4 --nostrict_len
 ```
 
-The combination of `group` and `k`/`max_len` determines which data files to use. Data files are stored by default in the `data/` directory and have the name `group=k.csv`.
+The combination of `group` and `k` determines which data files to use. Data files are stored by default in the `data/` directory and have the name `group=k.csv`.
 
 ### Training MLP Baselines
 
