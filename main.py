@@ -129,36 +129,29 @@ def tokenize(
 
 def get_dataset(
     group: str,
-    max_len: int | None,
-    k: int | None,
+    k: int,
+    strict_len: bool,
     train_size: float,
     data_dir: str | Path,
     supervised: bool = True,
 ) -> dict:
-    """Construct dataset.
-
-    TODO: `max_len` should be changed into a boolean `strict_length` flag
-    """
+    """Construct dataset."""
     assert train_size > 0 and train_size <= 1, "`train_size` must be in (0,1]"
 
-    if not ((k is None) ^ (max_len is None)):
-        raise ValueError("You must provide exactly one of `max_len` or `k`")
-
-    if max_len is not None:
-        assert max_len > 1, "`max_len` must be at least 2"
-        data_paths = [data_dir / f"{group}={i}.csv" for i in range(2, max_len + 1)]
-        if not data_paths[0].exists():
-            raise FileNotFoundError(f"You must have data for {group}={2}.")
-        data_paths = [p for p in data_paths if p.exists()]
-        data_paths = list(OrderedSet(data_paths))
-        log.info("Constructing dataset from:")
-        log.info("  " + "\n  ".join(map(str, data_paths)))
-    else:
+    if strict_len:
         assert k > 1, "`k` must be at least 2"
         data_paths = [data_dir / f"{group}={i}.csv" for i in [2, k]]
         data_paths = list(OrderedSet(data_paths))
         if not data_paths[0].exists():
             raise FileNotFoundError(f"You must have data for {group}={2}.")
+        log.info("Constructing dataset from:")
+        log.info("  " + "\n  ".join(map(str, data_paths)))
+    else:
+        data_paths = [data_dir / f"{group}={i}.csv" for i in range(2, k + 1)]
+        if not data_paths[0].exists():
+            raise FileNotFoundError(f"You must have data for {group}=2.")
+        data_paths = [p for p in data_paths if p.exists()]
+        data_paths = list(OrderedSet(data_paths))
         log.info("Constructing dataset from:")
         log.info("  " + "\n  ".join(map(str, data_paths)))
 
@@ -338,7 +331,7 @@ def train_mlp(
     # Load dataset
     datadict = get_dataset(
         group=group,
-        max_len=None,
+        strict_len=None,
         k=2,
         train_size=1.0,
         data_dir=data_dir,
@@ -466,8 +459,8 @@ def train(
     # Data parameters
     group: str,
     data_dir: Path = PROJECT_ROOT / "data",
-    max_len: int | None = None,
-    k: int | None = None,
+    k: int = 3,
+    strict_len: bool = True,
     train_size: float = 0.8,
     tagging: bool = True,
     # Model parameters
@@ -506,7 +499,14 @@ def train(
     log.setLevel(log_level)
 
     # Load dataset
-    datadict = get_dataset(group, max_len, k, train_size, data_dir, supervised=tagging)
+    datadict = get_dataset(
+        group=group,
+        k=k,
+        strict_len=strict_len,
+        train_size=train_size,
+        data_dir=data_dir,
+        supervised=tagging,
+    )
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
     tokenizer = datadict["tokenizer"]
@@ -530,12 +530,12 @@ def train(
         "k": k,
         "layer_norm_eps": layer_norm_eps,
         "lr": lr,
-        "max_len": max_len,
         "n_heads": n_heads,
         "norm_first": norm_first,
         "n_layers": n_layers,
         "n_vocab": n_vocab,
         "seed": seed,
+        "strict_len": strict_len,
         "tagging": tagging,
         "train_size": train_size,
         "weight_decay": weight_decay,

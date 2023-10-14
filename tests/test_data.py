@@ -103,7 +103,7 @@ class TestData(unittest.TestCase):  # noqa: D101
             data_dir=data_dir,
             group=group,
             k=k,
-            max_len=max_len,
+            strict_len=max_len,
             train_size=train_size,
             supervised=supervised,
         )
@@ -122,7 +122,7 @@ class TestData(unittest.TestCase):  # noqa: D101
             data_dir=data_dir,
             group=group,
             k=k,
-            max_len=max_len,
+            strict_len=max_len,
             train_size=train_size,
             supervised=supervised,
         )
