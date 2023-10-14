@@ -234,22 +234,25 @@ def detach_and_pad(
     preds = [d[0].cpu().detach() for d in data]
     tgts = [d[1].cpu().detach() for d in data]
 
+    # Preds are shape (batch_size, seq_len, n_vocab);
+    # We need to pad along the seq_len dimension, if necessary
     max_pred_len = max([p.shape[1] for p in preds])
     min_pred_len = min([p.shape[1] for p in preds])
-    max_tgt_len = max([t.shape[-1] for t in tgts])
-    min_tgt_len = min([t.shape[-1] for t in tgts])
+
+    # Targets are shape (batch_size, seq_len) or (batch_size);
+    # If they are single values per sequence, then there's no point in padding
+    max_tgt_len = max([t.shape[1] for t in tgts]) if tgts[0].dim() > 1 else 1
+    min_tgt_len = min([t.shape[1] for t in tgts]) if tgts[0].dim() > 1 else 1
 
     if max_pred_len != min_pred_len:
         for idx, p in enumerate(preds):
             pred_pad_size = max_pred_len - p.shape[1]
             if pred_pad_size > 0:
-                padding_logits = torch.ones_like(p[:, [0], :]) * float("-inf")
+                padding_logits = torch.zeroes_like(p[:, [0], :])
                 padding_logits[:, :, pad_token_id] = 1.0
 
                 padding_logits = torch.cat([padding_logits] * pred_pad_size, dim=1)
-
-                for _ in range(pred_pad_size):
-                    p = torch.cat((padding_logits, p), dim=1)
+                p = torch.cat((padding_logits, p), dim=1)
 
                 preds[idx] = p
 
@@ -257,7 +260,7 @@ def detach_and_pad(
     # don't need to worry about padding anything
     if (max_tgt_len != min_tgt_len) and (tgts[0].dim() > 1):
         for idx, t in enumerate(tgts):
-            tgt_pad_size = max_tgt_len - t.shape[-1]
+            tgt_pad_size = max_tgt_len - t.shape[1]
             if tgt_pad_size > 0:
                 t = F.pad(t, (tgt_pad_size, 0), mode="constant", value=pad_token_id)
                 tgts[idx] = t
