@@ -307,10 +307,10 @@ def train_mlp(
     data_dir: Path = PROJECT_ROOT / "data",
     # Model parameters
     d_model: int = 512,
-    dim_feedforward: int = 2048,
+    d_ff: int = 2048,
     activation: str = "relu",
     dropout: float = 0.1,
-    num_layers: int = 1,
+    n_layers: int = 1,
     weight_sharing: bool = False,
     weight_scale: float = 1.0,
     layer_norm_eps: float = 1e-05,
@@ -354,10 +354,10 @@ def train_mlp(
     project_hps = {
         "group": group,
         "d_model": d_model,
-        "dim_feedforward": dim_feedforward,
+        "d_ff": d_ff,
         "activation": activation,
         "dropout": dropout,
-        "num_layers": num_layers,
+        "n_layers": n_layers,
         "weight_sharing": weight_sharing,
         "weight_scale": weight_scale,
         "layer_norm_eps": layer_norm_eps,
@@ -382,10 +382,10 @@ def train_mlp(
 
     model = MLPSequenceClassifier(
         d_model=d_model,
-        d_ff=dim_feedforward,
+        d_ff=d_ff,
         activation=activation,
         dropout=dropout,
-        n_layers=num_layers,
+        n_layers=n_layers,
         weight_sharing=weight_sharing,
         weight_scale=weight_scale,
         layer_norm_eps=layer_norm_eps,
@@ -472,8 +472,8 @@ def train(
     tagging: bool = True,
     # Model parameters
     d_model: int = 512,
-    nhead: int = 8,
-    dim_feedforward: int = 2048,
+    n_heads: int = 8,
+    d_ff: int = 2048,
     dropout: float = 0.1,
     activation: str = "gelu",
     layer_norm_eps: float = 1e-5,
@@ -492,6 +492,7 @@ def train(
     weight_decay: float = 0.01,
     compile: bool = False,
     causal: bool = True,
+    gradient_clip: float | None = None,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
@@ -520,18 +521,19 @@ def train(
         "causal": causal,
         "compile": compile,
         "d_model": d_model,
-        "dim_feedforward": dim_feedforward,
+        "d_ff": d_ff,
         "dropout": dropout,
         "epochs": epochs,
         "eps": op_eps,
         "group": group,
+        "gradient_clip": gradient_clip,
         "k": k,
         "layer_norm_eps": layer_norm_eps,
         "lr": lr,
         "max_len": max_len,
-        "nhead": nhead,
+        "n_heads": n_heads,
         "norm_first": norm_first,
-        "num_layers": n_layers,
+        "n_layers": n_layers,
         "n_vocab": n_vocab,
         "seed": seed,
         "tagging": tagging,
@@ -553,8 +555,8 @@ def train(
     if tagging:
         model = EncoderTokenClassifier(
             d_model=d_model,
-            n_heads=nhead,
-            d_ff=dim_feedforward,
+            n_heads=n_heads,
+            d_ff=d_ff,
             dropout=dropout,
             activation=activation,
             layer_norm_eps=layer_norm_eps,
@@ -571,8 +573,8 @@ def train(
             cl_dim=1,
             cl_index=0,
             d_model=d_model,
-            n_heads=nhead,
-            d_ff=dim_feedforward,
+            n_heads=n_heads,
+            d_ff=d_ff,
             dropout=dropout,
             activation=activation,
             layer_norm_eps=layer_norm_eps,
@@ -680,6 +682,12 @@ def train(
                 log.debug(f"trgts: {references}")
 
             accelerator.backward(loss)
+
+            if gradient_clip is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), gradient_clip, norm_type=2.0
+                )
+
             optimizer.step()
 
             t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
