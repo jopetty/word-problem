@@ -248,7 +248,7 @@ def detach_and_pad(
         for idx, p in enumerate(preds):
             pred_pad_size = max_pred_len - p.shape[1]
             if pred_pad_size > 0:
-                padding_logits = torch.zeroes_like(p[:, [0], :])
+                padding_logits = torch.zeros_like(p[:, [0], :])
                 padding_logits[:, :, pad_token_id] = 1.0
 
                 padding_logits = torch.cat([padding_logits] * pred_pad_size, dim=1)
