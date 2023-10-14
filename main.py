@@ -331,8 +331,8 @@ def train_mlp(
     # Load dataset
     datadict = get_dataset(
         group=group,
-        strict_len=None,
         k=2,
+        strict_len=True,
         train_size=1.0,
         data_dir=data_dir,
         supervised=False,
