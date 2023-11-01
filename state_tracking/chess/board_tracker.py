@@ -1,14 +1,16 @@
 import numpy as np
 
+from ..tracker import Tracker
 from .move import Move
 from .piece_type import PieceType
 
-class BoardTracker:
+class BoardTracker(Tracker):
 
-    def __init__(self, size=(8, 8)):
+    def __init__(self, size=(8, 8), **fmt_options):
         self.white = True
         self.board = np.ones(size, dtype=np.int32) * PieceType.EMPTY.value
         self.history = []
+        self.fmt_options = fmt_options
     
     @classmethod
     def queen_rook_permutations(cls, n_items: int = 5):
@@ -58,3 +60,9 @@ class BoardTracker:
         self.dummy_move0()
         self.move((1, source), (0, source))
         self.dummy_move1()
+
+    def get_history(self):
+        return [move.format(**self.fmt_options) for move in self.history]
+
+    def get_state(self):
+        return self.board
