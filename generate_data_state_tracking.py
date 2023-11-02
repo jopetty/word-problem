@@ -43,6 +43,7 @@ def main(args):
     else:
         raise ValueError("unknown problem:", args.problem)
 
+    random.seed(args.seed)
     generator = DataGenerator(new_tracker, args.n_items)
     for _ in range(args.n_samples):
         blob = generator.sample_transposition_instance(args.length)
@@ -55,6 +56,7 @@ def parse_args():
     parser.add_argument("--length", type=int, default=5)
     parser.add_argument("--n_items", type=int, default=5)
     parser.add_argument("--n_samples", type=int, default=10)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no_piece_type", action="store_true")
     parser.add_argument("--no_source", action="store_true")
     parser.add_argument("--no_target", action="store_true")
