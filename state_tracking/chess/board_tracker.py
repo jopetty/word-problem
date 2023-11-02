@@ -72,4 +72,4 @@ class BoardTracker(Tracker):
     def get_state(self):
         """Return a flat list of piece type codes"""
         rows = [" ".join(PieceType(x).get_code() for x in row) for row in self.board]
-        return ";".join(rows)
+        return " ; ".join(rows)
