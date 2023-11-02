@@ -65,4 +65,6 @@ class BoardTracker(Tracker):
         return [move.format(**self.fmt_options) for move in self.history]
 
     def get_state(self):
-        return self.board
+        """Return a flat list of piece type codes"""
+        rows = [" ".join(PieceType(x).get_code() for x in row) for row in self.board]
+        return ";".join(rows)

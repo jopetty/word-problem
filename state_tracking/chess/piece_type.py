@@ -11,4 +11,6 @@ class PieceType(Enum):
     BLACK_KING = auto()
 
     def get_code(self):
+        if self == PieceType.EMPTY:
+            return "."
         return self.name.split("_")[1][0]

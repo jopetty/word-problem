@@ -15,7 +15,7 @@ class DataGenerator:
         self.new_tracker = new_tracker
         self.n_items = n_items
     
-    def sample_transposition_instance(self, length: int) -> Tuple[List[str], Any]:
+    def sample_transposition_instance(self, length: int) -> Tuple[List[str], str]:
         """Function to sample a sequence of transpositions and final state.
 
         Returns the list of actions and the final state. The type of the state is:

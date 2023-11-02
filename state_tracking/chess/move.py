@@ -17,7 +17,7 @@ class Move(NamedTuple):
     def __repr__(self):
         return self.format()
 
-    def format(self, piece_type=True, source=True, target=True):
+    def format(self, piece_type=True, source=True, target=True) -> str:
         tokens = []
         if piece_type:
             tokens.append(self.piece_type.get_code())
@@ -25,4 +25,4 @@ class Move(NamedTuple):
             tokens.append(format_position(self.source))
         if target:
             tokens.append(format_position(self.target))
-        return "".join(tokens)
+        return " ".join(tokens)
