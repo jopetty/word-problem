@@ -115,12 +115,17 @@ def tokenize(
     tokenized = tokenizer(
         example["input"],
         return_tensors="pt",
+        padding=True,
     )
     tokenized.pop("attention_mask", None)
 
     # If output is not supervised (e.g., for MLPs) then we only keep the final target
     # value since its sequence classification, not token classification.
-    tokenized["labels"] = tokenizer(example["target"], return_tensors="pt")["input_ids"]
+    tokenized["labels"] = tokenizer(
+        example["target"],
+        return_tensors="pt",
+        padding=True,
+    )["input_ids"]
     if not supervised:
         tokenized["labels"] = tokenized["labels"][:, -1]
 
@@ -201,24 +206,24 @@ def get_dataset(
         if train_size < 1:
             dataset = dataset.train_test_split(train_size=train_size)
     else:
-        pair_data = (
-            load_dataset("csv", data_files=str(data_paths[0]), split="all")
+        train_data = (
+            load_dataset("csv", data_files=map(str, data_paths[:-1]), split="all")
             .remove_columns(["seed"])
             .map(tokenize_map, batched=True)
             .remove_columns(["input", "target", "token_type_ids"])
         )
-        long_data = (
-            load_dataset("csv", data_files=map(str, data_paths[1:]), split="all")
+        k_data = (
+            load_dataset("csv", data_files=str(data_paths[-1]), split="all")
             .remove_columns(["seed"])
             .map(tokenize_map, batched=True)
             .remove_columns(["input", "target", "token_type_ids"])
         )
 
         if train_size < 1:
-            dataset = long_data.train_test_split(train_size=train_size)
-            dataset["train"] = concatenate_datasets([dataset["train"], pair_data])
+            dataset = k_data.train_test_split(train_size=train_size)
+            dataset["train"] = concatenate_datasets([dataset["train"], train_data])
         else:
-            dataset = concatenate_datasets([long_data, pair_data])
+            dataset = concatenate_datasets([train_data, k_data])
 
     return {
         "dataset": dataset.with_format("torch"),
