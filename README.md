@@ -17,20 +17,21 @@ conda env create && conda activate depth
 To train a model, run `python main.py train`. Command-line arguments to configure the training run are the arguments to the `main` function, which is the most accurate documentation for what to do. Some important ones:
 
 - `--group`: the name of the group to train on.
+- `--k`: the length of the sequences to train on. Must be greater than 1.
 - `--num_layers`: how many layers in the transformer encoder.
 - `--epochs`: the number of epochs to train for.
 
-You must include exactly one of `--k` or `--max_len`. These values specify how long the sequences of the dataset are in terms of the number of elements multiplied together. If `--k` is passed, sequences will be of length 2 or `k`; if `--max_len` is passed, they will be of lengths between 2 and `max_len`. If `k` or `max_len` are greater than 2, the training set will include all sequences of length 2 plus a random subset of the longer sequences; if `k` or `max_len` are equal to 2, the 2-element sequences will be split between the train and validation sets.
+Training on sequences of length `k` means that all `G=k` sequences will be split between the train and test sets. Additionally, all sequences of length 2 will be included in the training set. By default, lengths are 'strict' in the sense that models will see only sequences of length 2 and `k`; to include sequences of length 2 <= `m` <= `k`, you can pass the `--nostrict_len` flag.
 
 ```bash
 # Trains a model on all sequences of length 2, 4 on data from S5
 python main.py train --group S5 --k 4
 
 # Trains a model on all sequences of length 2, 3, 4 on data from S5
-python main.py train --group S5 --max_len 4
+python main.py train --group S5 --k 4 --nostrict_len
 ```
 
-The combination of `group` and `k`/`max_len` determines which data files to use. Data files are stored by default in the `data/` directory and have the name `group=k.csv`.
+The combination of `group` and `k` determines which data files to use. Data files are stored by default in the `data/` directory and have the name `group=k.csv`.
 
 ### Training MLP Baselines
 

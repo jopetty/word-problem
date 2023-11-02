@@ -129,36 +129,29 @@ def tokenize(
 
 def get_dataset(
     group: str,
-    max_len: int | None,
-    k: int | None,
+    k: int,
+    strict_len: bool,
     train_size: float,
     data_dir: str | Path,
     supervised: bool = True,
 ) -> dict:
-    """Construct dataset.
-
-    TODO: `max_len` should be changed into a boolean `strict_length` flag
-    """
+    """Construct dataset."""
     assert train_size > 0 and train_size <= 1, "`train_size` must be in (0,1]"
 
-    if not ((k is None) ^ (max_len is None)):
-        raise ValueError("You must provide exactly one of `max_len` or `k`")
-
-    if max_len is not None:
-        assert max_len > 1, "`max_len` must be at least 2"
-        data_paths = [data_dir / f"{group}={i}.csv" for i in range(2, max_len + 1)]
-        if not data_paths[0].exists():
-            raise FileNotFoundError(f"You must have data for {group}={2}.")
-        data_paths = [p for p in data_paths if p.exists()]
-        data_paths = list(OrderedSet(data_paths))
-        log.info("Constructing dataset from:")
-        log.info("  " + "\n  ".join(map(str, data_paths)))
-    else:
+    if strict_len:
         assert k > 1, "`k` must be at least 2"
         data_paths = [data_dir / f"{group}={i}.csv" for i in [2, k]]
         data_paths = list(OrderedSet(data_paths))
         if not data_paths[0].exists():
             raise FileNotFoundError(f"You must have data for {group}={2}.")
+        log.info("Constructing dataset from:")
+        log.info("  " + "\n  ".join(map(str, data_paths)))
+    else:
+        data_paths = [data_dir / f"{group}={i}.csv" for i in range(2, k + 1)]
+        if not data_paths[0].exists():
+            raise FileNotFoundError(f"You must have data for {group}=2.")
+        data_paths = [p for p in data_paths if p.exists()]
+        data_paths = list(OrderedSet(data_paths))
         log.info("Constructing dataset from:")
         log.info("  " + "\n  ".join(map(str, data_paths)))
 
@@ -241,22 +234,25 @@ def detach_and_pad(
     preds = [d[0].cpu().detach() for d in data]
     tgts = [d[1].cpu().detach() for d in data]
 
+    # Preds are shape (batch_size, seq_len, n_vocab);
+    # We need to pad along the seq_len dimension, if necessary
     max_pred_len = max([p.shape[1] for p in preds])
     min_pred_len = min([p.shape[1] for p in preds])
-    max_tgt_len = max([t.shape[-1] for t in tgts])
-    min_tgt_len = min([t.shape[-1] for t in tgts])
+
+    # Targets are shape (batch_size, seq_len) or (batch_size);
+    # If they are single values per sequence, then there's no point in padding
+    max_tgt_len = max([t.shape[1] for t in tgts]) if tgts[0].dim() > 1 else 1
+    min_tgt_len = min([t.shape[1] for t in tgts]) if tgts[0].dim() > 1 else 1
 
     if max_pred_len != min_pred_len:
         for idx, p in enumerate(preds):
             pred_pad_size = max_pred_len - p.shape[1]
             if pred_pad_size > 0:
-                padding_logits = torch.ones_like(p[:, [0], :]) * float("-inf")
+                padding_logits = torch.zeros_like(p[:, [0], :])
                 padding_logits[:, :, pad_token_id] = 1.0
 
                 padding_logits = torch.cat([padding_logits] * pred_pad_size, dim=1)
-
-                for _ in range(pred_pad_size):
-                    p = torch.cat((padding_logits, p), dim=1)
+                p = torch.cat((padding_logits, p), dim=1)
 
                 preds[idx] = p
 
@@ -264,7 +260,7 @@ def detach_and_pad(
     # don't need to worry about padding anything
     if (max_tgt_len != min_tgt_len) and (tgts[0].dim() > 1):
         for idx, t in enumerate(tgts):
-            tgt_pad_size = max_tgt_len - t.shape[-1]
+            tgt_pad_size = max_tgt_len - t.shape[1]
             if tgt_pad_size > 0:
                 t = F.pad(t, (tgt_pad_size, 0), mode="constant", value=pad_token_id)
                 tgts[idx] = t
@@ -338,8 +334,8 @@ def train_mlp(
     # Load dataset
     datadict = get_dataset(
         group=group,
-        max_len=None,
         k=2,
+        strict_len=True,
         train_size=1.0,
         data_dir=data_dir,
         supervised=False,
@@ -465,9 +461,9 @@ def train_mlp(
 def train(
     # Data parameters
     group: str,
+    k: int,
     data_dir: Path = PROJECT_ROOT / "data",
-    max_len: int | None = None,
-    k: int | None = None,
+    strict_len: bool = True,
     train_size: float = 0.8,
     tagging: bool = True,
     # Model parameters
@@ -506,7 +502,14 @@ def train(
     log.setLevel(log_level)
 
     # Load dataset
-    datadict = get_dataset(group, max_len, k, train_size, data_dir, supervised=tagging)
+    datadict = get_dataset(
+        group=group,
+        k=k,
+        strict_len=strict_len,
+        train_size=train_size,
+        data_dir=data_dir,
+        supervised=tagging,
+    )
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
     tokenizer = datadict["tokenizer"]
@@ -530,12 +533,12 @@ def train(
         "k": k,
         "layer_norm_eps": layer_norm_eps,
         "lr": lr,
-        "max_len": max_len,
         "n_heads": n_heads,
         "norm_first": norm_first,
         "n_layers": n_layers,
         "n_vocab": n_vocab,
         "seed": seed,
+        "strict_len": strict_len,
         "tagging": tagging,
         "train_size": train_size,
         "weight_decay": weight_decay,
