@@ -46,6 +46,11 @@ class BoardTracker(Tracker):
         self.move((7, 1), (7, 0))
     
     def transpose(self, source, target):
+        if source == target:
+            self.dummy_move0()
+            self.dummy_move1()
+            return
+
         self.move((0, source), (2, source))
         self.dummy_move0()
         self.move((0, target), (1, target))
