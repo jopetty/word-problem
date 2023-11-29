@@ -162,3 +162,4 @@ cython_debug/
 wandb/
 scratchpad.ipynb
 .vscode/
+.ruff_cache/
