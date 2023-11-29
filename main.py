@@ -139,6 +139,7 @@ def get_dataset(
     train_size: float,
     data_dir: str | Path,
     supervised: bool = True,
+    max_samples: int | None = None,
 ) -> dict:
     """Construct dataset."""
     assert train_size > 0 and train_size <= 1, "`train_size` must be in (0,1]"
@@ -203,21 +204,31 @@ def get_dataset(
             .map(tokenize_map, batched=True)
             .remove_columns(["input", "target", "token_type_ids"])
         )
+        if max_samples is not None:
+            num_samples = min(len(dataset), max_samples)
+            dataset = dataset.select(range(num_samples))
         if train_size < 1:
             dataset = dataset.train_test_split(train_size=train_size)
     else:
-        train_data = (
-            load_dataset("csv", data_files=map(str, data_paths[:-1]), split="all")
+        train_data = [
+            load_dataset("csv", data_files=str(d_path), split="all")
             .remove_columns(["seed"])
             .map(tokenize_map, batched=True)
             .remove_columns(["input", "target", "token_type_ids"])
-        )
+            for d_path in data_paths[:-1]
+        ]
         k_data = (
             load_dataset("csv", data_files=str(data_paths[-1]), split="all")
             .remove_columns(["seed"])
             .map(tokenize_map, batched=True)
             .remove_columns(["input", "target", "token_type_ids"])
         )
+
+        if max_samples is not None:
+            k_data = k_data.select(range(min(len(k_data), max_samples)))
+            train_data = [t.select(range(min(len(t), max_samples))) for t in train_data]
+
+        train_data = concatenate_datasets(train_data)
 
         if train_size < 1:
             dataset = k_data.train_test_split(train_size=train_size)
@@ -471,6 +482,7 @@ def train(
     strict_len: bool = True,
     train_size: float = 0.8,
     tagging: bool = True,
+    max_samples: int | None = None,
     # Model parameters
     d_model: int = 512,
     n_heads: int = 8,
@@ -514,6 +526,7 @@ def train(
         train_size=train_size,
         data_dir=data_dir,
         supervised=tagging,
+        max_samples=max_samples,
     )
     dataset = datadict["dataset"]
     n_vocab = datadict["n_vocab"]
@@ -538,6 +551,7 @@ def train(
         "k": k,
         "layer_norm_eps": layer_norm_eps,
         "lr": lr,
+        "max_samples": max_samples,
         "n_heads": n_heads,
         "norm_first": norm_first,
         "n_layers": n_layers,
