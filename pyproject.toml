@@ -23,7 +23,6 @@ dependencies = [
     "numpy",
     "ordered-set",
     "polars",
-    "pre-commit",
     "pydotenv",
     "pyrootutils",
     "scikit-learn",
@@ -35,11 +34,19 @@ dependencies = [
     "wandb",
 ]
 
+[project.optional-dependencies]
+dev = ["pre-commit"]
+
 [tool.ruff]
 select = ["D", "E", "F", "I", "N"]
 line-length = 88
 extend-exclude = [
-    "*.txt", "*.csv",
+    "data/",
     "src/state_tracking/*",
     "src/generate_data_state_tracking.py"
+]
+
+[tool.ruff.format]
+exclude = [
+    "data/"
 ]
