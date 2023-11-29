@@ -7,7 +7,7 @@ Data and code to evaluate how deep transformer models need to be to learn group 
 Dependencies are specified in `pyproject.toml` and can be installed with any Python package manger (e.g., `pip` or `poetry`). For convenience, we also provide a Conda `environment.yml` file which wraps around `pyproject.toml`. To create the environment and install all dependencies, run
 
 ```bash
-conda env create && conda activate depth
+conda env create && conda activate wp
 ```
 
 ## Use

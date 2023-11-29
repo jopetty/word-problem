@@ -1,4 +1,4 @@
-name: depth
+name: wp
 
 dependencies:
   - python=3.11
