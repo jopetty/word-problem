@@ -9,6 +9,7 @@ from pprint import pformat
 from random import randint
 
 import fire
+import humanize
 import polars as pl
 import pyrootutils
 import torch
@@ -19,7 +20,13 @@ from accelerate.utils import set_seed
 from datasets import concatenate_datasets, load_dataset
 from dotenv import load_dotenv
 from ordered_set import OrderedSet
-from sfirah.metrics import ce_loss, sequence_accuracy, token_accuracy
+from sfirah.metrics import (
+    ce_loss,
+    detach_and_pad,
+    reduce_metrics,
+    sequence_accuracy,
+    token_accuracy,
+)
 from sfirah.mlp import MLPSequenceClassifier
 from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifier
 from tokenizers import Tokenizer
@@ -241,50 +248,6 @@ def get_dataset(
         "tokenizer": tokenizer,
         "n_vocab": tokenizer_base.get_vocab_size(with_added_tokens=True),
     }
-
-
-def detach_and_pad(
-    data: list[(Tensor, Tensor)], pad_token_id: int
-) -> dict[str, Tensor]:
-    """Detach tensors from accelerator and pad them to be the same length."""
-    preds = [d[0].cpu().detach() for d in data]
-    tgts = [d[1].cpu().detach() for d in data]
-
-    # Preds are shape (batch_size, seq_len, n_vocab);
-    # We need to pad along the seq_len dimension, if necessary
-    max_pred_len = max([p.shape[1] for p in preds])
-    min_pred_len = min([p.shape[1] for p in preds])
-
-    # Targets are shape (batch_size, seq_len) or (batch_size);
-    # If they are single values per sequence, then there's no point in padding
-    max_tgt_len = max([t.shape[1] for t in tgts]) if tgts[0].dim() > 1 else 1
-    min_tgt_len = min([t.shape[1] for t in tgts]) if tgts[0].dim() > 1 else 1
-
-    if max_pred_len != min_pred_len:
-        for idx, p in enumerate(preds):
-            pred_pad_size = max_pred_len - p.shape[1]
-            if pred_pad_size > 0:
-                padding_logits = torch.zeros_like(p[:, [0], :])
-                padding_logits[:, :, pad_token_id] = 1.0
-
-                padding_logits = torch.cat([padding_logits] * pred_pad_size, dim=1)
-                p = torch.cat((padding_logits, p), dim=1)
-
-                preds[idx] = p
-
-    # if targets are single values per sequence (i.e., non-supervised) then we
-    # don't need to worry about padding anything
-    if (max_tgt_len != min_tgt_len) and (tgts[0].dim() > 1):
-        for idx, t in enumerate(tgts):
-            tgt_pad_size = max_tgt_len - t.shape[1]
-            if tgt_pad_size > 0:
-                t = F.pad(t, (tgt_pad_size, 0), mode="constant", value=pad_token_id)
-                tgts[idx] = t
-
-    preds = torch.cat(preds, dim=0)
-    tgts = torch.cat(tgts, dim=0)
-
-    return {"predictions": preds, "targets": tgts}
 
 
 def compute_metrics(
@@ -611,14 +574,14 @@ def train(
 
     if compile:
         log.info("Compiling model...")
-        # TODO: This may not work on CUDA. It doesn't seem like
-        # this should be necessary since
-        # # https://github.com/pytorch/pytorch/pull/96980 was merged, but
-        # not specifying the backend causes an error.
-        model = torch.compile(model, backend="aot_eager")
+        model = torch.compile(model)
         log.info("Model compiled!")
 
     log.info(f"Model: {model}")
+    log.info(
+        f"Number of parameters: {humanize.intword(model.num_parameters)}"
+        f" ({model.num_parameters})"
+    )
     log.info(f"Accelerator state: {accelerator.state}")
 
     device = accelerator.device
@@ -674,7 +637,7 @@ def train(
     global_step = 0
     for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
         model.train()
-        train_data = []
+        train_results = []
         for batch in (
             t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
         ):
@@ -693,7 +656,14 @@ def train(
                 output = model(source)
 
             predictions, references = accelerator.gather_for_metrics((output, target))
-            train_data.append((predictions, references))
+            train_results.append(
+                compute_metrics(
+                    [(predictions, references)],
+                    tokenizer=tokenizer,
+                    metric_fns=metric_fns,
+                    prefix="train",
+                )
+            )
 
             target = target.flatten()
             output = output.flatten(end_dim=-2)
@@ -714,13 +684,11 @@ def train(
 
             t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
 
-        train_metrics = compute_metrics(
-            train_data, prefix="train", tokenizer=tokenizer, metric_fns=metric_fns
-        )
-        accelerator.log(train_metrics, step=global_step)
+        accelerator.log({"epoch": epoch}, step=global_step)
+        accelerator.log(reduce_metrics(train_results), step=global_step)
 
         model.eval()
-        eval_data = []
+        eval_results = []
         for batch in tqdm(eval_dataloader, desc="Eval", position=1, leave=False):
             source = batch["input_ids"]
             target = batch["labels"]
@@ -735,14 +703,17 @@ def train(
 
             predictions, references = accelerator.gather_for_metrics((output, target))
 
-            eval_data.append((predictions, references))
+            eval_results.append(
+                compute_metrics(
+                    [(predictions, references)],
+                    prefix="val",
+                    tokenizer=tokenizer,
+                    metric_fns=metric_fns,
+                )
+            )
 
-        eval_metrics = compute_metrics(
-            eval_data, prefix="val", tokenizer=tokenizer, metric_fns=metric_fns
-        )
+        eval_metrics = reduce_metrics(eval_results)
         accelerator.log(eval_metrics, step=global_step)
-        accelerator.log({"epoch": epoch}, step=global_step)
-
         n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
 
     log.info(eval_metrics)

@@ -4,6 +4,7 @@ evaluate
 fire
 git+https://github.com/jopetty/abstract_algebra
 git+https://github.com/jopetty/sfirah
+humanize
 ipykernel
 numpy
 ordered-set
