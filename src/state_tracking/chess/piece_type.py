@@ -1,5 +1,6 @@
 from enum import Enum, auto
 
+
 class PieceType(Enum):
     EMPTY = auto()
     WHITE_PAWN = auto()

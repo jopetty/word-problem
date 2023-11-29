@@ -1,21 +1,19 @@
 """Generate data for chess/Python state tracking experiments."""
 
+import argparse
 import json
 import random
-from typing import Any, Tuple, List
-import argparse
-import random
 
-from state_tracking.python import PythonTracker
 from state_tracking.chess import BoardTracker
+from state_tracking.python import PythonTracker
+
 
 class DataGenerator:
-
     def __init__(self, new_tracker, n_items):
         self.new_tracker = new_tracker
         self.n_items = n_items
-    
-    def sample_transposition_instance(self, length: int) -> Tuple[List[str], str]:
+
+    def sample_transposition_instance(self, length: int) -> tuple[list[str], str]:
         """Function to sample a sequence of transpositions and final state.
 
         Returns the list of actions and the final state. The type of the state is:
@@ -37,9 +35,15 @@ class DataGenerator:
 
 def main(args):
     if args.problem == "chess":
-        new_tracker = lambda n_items: BoardTracker.queen_rook_permutations(n_items)
+
+        def new_tracker(n_items):
+            return BoardTracker.queen_rook_permutations(n_items)
+
     elif args.problem == "python":
-        new_tracker = lambda n_items: PythonTracker.random_init(n_items)
+
+        def new_tracker(n_items):
+            return PythonTracker.random_init(n_items)
+
     else:
         raise ValueError("unknown problem:", args.problem)
 
