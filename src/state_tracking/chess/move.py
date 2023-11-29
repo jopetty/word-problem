@@ -4,9 +4,11 @@ from .piece_type import PieceType
 
 LETTERS = "abcedfgh"
 
+
 def format_position(position):
     i, j = position
-    return f"{LETTERS[i]}{8 - j}" 
+    return f"{LETTERS[i]}{8 - j}"
+
 
 class Move(NamedTuple):
     white: bool

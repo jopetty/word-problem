@@ -4,8 +4,8 @@ from .tracker import Tracker
 
 BITS = [False, True]
 
-class PythonTracker(Tracker):
 
+class PythonTracker(Tracker):
     def __init__(self, eval_context, history, mode):
         self.eval_context = eval_context
         self.history = history
@@ -37,7 +37,7 @@ class PythonTracker(Tracker):
                 self.history.append(f"if not x{i} and x{j}: x{i}, x{j} = True, False")
             case "tuple":
                 self.history.append(f"x{i}, x{j} = x{j}, x{i}")
-    
+
     def get_history(self):
         return self.history
 
