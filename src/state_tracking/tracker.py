@@ -1,15 +1,13 @@
-from typing import List
 from abc import ABCMeta, abstractmethod
 
 
 class Tracker(metaclass=ABCMeta):
-
     @abstractmethod
     def transpose(self, i, j):
         return NotImplemented
 
     @abstractmethod
-    def get_history(self) -> List[str]:
+    def get_history(self) -> list[str]:
         return NotImplemented
 
     @abstractmethod

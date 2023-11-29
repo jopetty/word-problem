@@ -4,14 +4,14 @@ from ..tracker import Tracker
 from .move import Move
 from .piece_type import PieceType
 
-class BoardTracker(Tracker):
 
+class BoardTracker(Tracker):
     def __init__(self, size=(8, 8), **fmt_options):
         self.white = True
         self.board = np.ones(size, dtype=np.int32) * PieceType.EMPTY.value
         self.history = []
         self.fmt_options = fmt_options
-    
+
     @classmethod
     def queen_rook_permutations(cls, n_items: int = 5):
         board = cls()
@@ -26,7 +26,7 @@ class BoardTracker(Tracker):
         board[7, 7] = PieceType.BLACK_KING
 
         return board
-    
+
     def __setitem__(self, index, piece_type):
         self.board[index] = piece_type.value
 
@@ -38,13 +38,13 @@ class BoardTracker(Tracker):
         self[target] = self[source]
         self[source] = PieceType.EMPTY
         self.white = not self.white
-    
+
     def dummy_move0(self):
         self.move((7, 0), (7, 1))
-    
+
     def dummy_move1(self):
         self.move((7, 1), (7, 0))
-    
+
     def transpose(self, source, target):
         if source == target:
             self.dummy_move0()
@@ -70,6 +70,6 @@ class BoardTracker(Tracker):
         return [move.format(**self.fmt_options) for move in self.history]
 
     def get_state(self):
-        """Return a flat list of piece type codes"""
+        """Return a flat list of piece type codes."""
         rows = [" ".join(PieceType(x).get_code() for x in row) for row in self.board]
         return " ; ".join(rows)
