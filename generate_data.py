@@ -85,7 +85,7 @@ def main(
         if samples > num_unique_sequences:
             print(
                 f"Warning: {samples} > {num_unique_sequences}. I will only"
-                f"generate {num_unique_sequences} examples."
+                f" generate {num_unique_sequences} examples."
             )
             samples = num_unique_sequences
         print(f"Randomly sampling {samples} sequences.")
