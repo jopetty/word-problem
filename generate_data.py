@@ -87,7 +87,7 @@ def main(
                 f"Warning: {samples} > {num_unique_sequences}. I will only"
                 f"generate {num_unique_sequences} examples."
             )
-            samples = num_elements
+            samples = num_unique_sequences
         print(f"Randomly sampling {samples} sequences.")
         sequences = set()
         while len(sequences) < samples:
