@@ -442,7 +442,7 @@ def train(
     group: str,
     k: int,
     data_dir: Path = PROJECT_ROOT / "data",
-    strict_len: bool = True,
+    strict_len: bool = False,
     train_size: float = 0.8,
     tagging: bool = True,
     max_samples: int | None = None,
