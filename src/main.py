@@ -635,6 +635,7 @@ def train(
         metric_fns["token_accuracy"] = token_accuracy
 
     global_step = 0
+    best_val_acc = 0.0
     for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
         model.train()
         train_results = []
@@ -713,6 +714,13 @@ def train(
             )
 
         eval_metrics = reduce_metrics(eval_results)
+
+        if eval_metrics["val/sequence_accuracy"] > best_val_acc:
+            best_val_acc = eval_metrics["val/sequence_accuracy"]
+
+            # TODO: model checkpointing logic here
+
+        eval_metrics["val/best_sequence_accuracy"] = best_val_acc
         accelerator.log(eval_metrics, step=global_step)
         n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
 

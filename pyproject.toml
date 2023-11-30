@@ -46,8 +46,3 @@ extend-exclude = [
     "src/state_tracking/*",
     "src/generate_data_state_tracking.py"
 ]
-
-[tool.ruff.format]
-exclude = [
-    "data/"
-]
