@@ -388,11 +388,6 @@ def train_trns(
             source = batch["input_ids"]
             target = batch["labels"]
 
-            # print("Source: ", source)
-            # print("Target: ", target)
-
-            # raise SystemExit
-
             if causal:
                 mask = torch.nn.Transformer.generate_square_subsequent_mask(
                     source.shape[1], device=device
@@ -447,6 +442,242 @@ def train_trns(
                     output = model(source, mask=mask, is_causal=True)
                 else:
                     output = model(source)
+
+            predictions, references = accelerator.gather_for_metrics((output, target))
+
+            eval_results.append(
+                compute_metrics(
+                    [(predictions, references)],
+                    prefix="val",
+                    tokenizer=tokenizer,
+                    metric_fns=metric_fns,
+                )
+            )
+
+        eval_metrics = reduce_metrics(eval_results)
+
+        if eval_metrics["val/sequence_accuracy"] > best_val_acc:
+            best_val_acc = eval_metrics["val/sequence_accuracy"]
+
+            # TODO: model checkpointing logic here
+
+        eval_metrics["val/best_sequence_accuracy"] = best_val_acc
+        accelerator.log(eval_metrics, step=global_step)
+        n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
+
+        if max_val_acc is not None and best_val_acc >= max_val_acc:
+            log.info(f"Validation accuracy reached {max_val_acc}. Stopping training.")
+            break
+
+    log.info(eval_metrics)
+    accelerator.end_training()
+
+
+def train_mamba(
+    # Data parameters
+    data_dir: str | Path = PROJECT_ROOT / "data",
+    type: str = "prefix",
+    vocab_size: int = 2,
+    k: int = 20,
+    max_samples: int | None = None,
+    train_size: float = 0.8,
+    # Model parameters
+    d_model: int = 512,
+    dropout: float = 0.0,
+    layer_norm_eps: float = 1e-5,
+    n_layers: int = 1,
+    rms_norm: bool = False,
+    fused_add_norm: bool = False,
+    residual_in_fp32: bool = False,
+    bias: bool = True,
+    # Training parameters
+    epochs: int = 500,
+    batch_size: int = 32,
+    lr: float = 1e-4,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    op_eps: float = 1e-8,
+    weight_decay: float = 0.01,
+    compile: bool = False,
+    gradient_clip: float | None = None,
+    max_val_acc: float | None = 0.99,
+    # Misc
+    log_level: str = "INFO",
+    seed: int = randint(0, 2**32 - 1),
+    project_name: str = "copying_mamba",
+    logging: bool = True,
+):
+    """Train Mamba model."""
+    set_seed(seed)
+
+    accelerator = Accelerator(log_with="wandb") if logging else Accelerator()
+    log.setLevel(log_level)
+
+    # Load dataset
+    datadict = get_dataset(
+        data_dir=data_dir,
+        k=k,
+        type=type,
+        vocab_size=vocab_size,
+        train_size=train_size,
+        max_samples=max_samples,
+    )
+    dataset = datadict["dataset"]
+    n_vocab = datadict["n_vocab"]
+    tokenizer = datadict["tokenizer"]
+    collate_fn = partial(pad_collate, pad_token_id=tokenizer.pad_token_id)
+
+    # Set up logger
+    project_hps = {
+        "batch_size": batch_size,
+        "betas": (beta1, beta2),
+        "bias": bias,
+        "compile": compile,
+        "d_model": d_model,
+        "dropout": dropout,
+        "epochs": epochs,
+        "eps": op_eps,
+        "fused_add_norm": fused_add_norm,
+        "gradient_clip": gradient_clip,
+        "k": k,
+        "layer_norm_eps": layer_norm_eps,
+        "lr": lr,
+        "max_val_acc": max_val_acc,
+        "max_samples": max_samples,
+        "n_layers": n_layers,
+        "n_vocab": n_vocab,
+        "residual_in_fp32": residual_in_fp32,
+        "rms_norm": rms_norm,
+        "seed": seed,
+        "train_size": train_size,
+        "type": type,
+        "vocab_size": vocab_size,
+        "weight_decay": weight_decay,
+    }
+
+    accelerator.init_trackers(
+        project_name,
+        config=project_hps,
+    )
+
+    log.info(f"Config: {pformat(project_hps)}")
+    log.info(f"Dataset: {dataset}")
+
+    model = MambaSequenceClassifier(
+        cl_dim=1,
+        cl_index=-1,
+        d_model=d_model,
+        dropout=dropout,
+        layer_norm_eps=layer_norm_eps,
+        n_layers=n_layers,
+        n_vocab=n_vocab,
+        bias=bias,
+        rms_norm=rms_norm,
+        fused_add_norm=fused_add_norm,
+        residual_in_fp32=residual_in_fp32,
+    )
+
+    if compile:
+        log.info("Compiling model...")
+        model = torch.compile(model)
+        log.info("Model compiled!")
+
+    log.info(f"Model: {model}")
+    log.info(
+        f"Number of parameters: {humanize.intword(model.num_parameters)}"
+        f" ({model.num_parameters})"
+    )
+    log.info(f"Accelerator state: {accelerator.state}")
+
+    device = accelerator.device
+
+    model = model.to(device)
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=lr,
+        betas=(beta1, beta2),
+        eps=op_eps,
+        weight_decay=weight_decay,
+    )
+
+    train_dataloader = DataLoader(
+        dataset["train"],
+        shuffle=True,
+        batch_size=batch_size,
+        collate_fn=collate_fn,
+    )
+    eval_dataloader = DataLoader(
+        dataset["test"],
+        shuffle=False,
+        batch_size=batch_size,
+        collate_fn=collate_fn,
+    )
+
+    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
+        model, optimizer, train_dataloader, eval_dataloader
+    )
+
+    metric_fns = {
+        "loss": ce_loss,
+        "sequence_accuracy": token_accuracy,
+    }
+
+    global_step = 0
+    best_val_acc = 0.0
+    for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
+        model.train()
+        train_results = []
+        for batch in (
+            t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
+        ):
+            global_step += 1
+            optimizer.zero_grad()
+
+            source = batch["input_ids"]
+            target = batch["labels"]
+
+            output = model(source)
+
+            predictions, references = accelerator.gather_for_metrics((output, target))
+            train_results.append(
+                compute_metrics(
+                    [(predictions, references)],
+                    tokenizer=tokenizer,
+                    metric_fns=metric_fns,
+                    prefix="train",
+                )
+            )
+
+            target = target.flatten()
+            output = output.flatten(end_dim=-2)
+            loss = F.cross_entropy(output, target)
+
+            if global_step % 100 == 0:
+                log.debug(f"source: {source}")
+                log.debug(f"preds: {predictions.argmax(dim=-1)}")
+                log.debug(f"trgts: {references}")
+
+            accelerator.backward(loss)
+
+            if gradient_clip is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), gradient_clip, norm_type=2.0
+                )
+
+            optimizer.step()
+
+            t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
+
+        accelerator.log({"epoch": epoch}, step=global_step)
+        accelerator.log(reduce_metrics(train_results), step=global_step)
+
+        model.eval()
+        eval_results = []
+        for batch in tqdm(eval_dataloader, desc="Eval", position=1, leave=False):
+            source = batch["input_ids"]
+            target = batch["labels"]
+            with torch.no_grad():
+                output = model(source)
 
             predictions, references = accelerator.gather_for_metrics((output, target))
 
