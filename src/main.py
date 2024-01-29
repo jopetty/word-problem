@@ -475,6 +475,7 @@ def train_trns(
     compile: bool = False,
     causal: bool = True,
     gradient_clip: float | None = None,
+    max_val_acc: float | None = 0.99,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
@@ -730,6 +731,10 @@ def train_trns(
         accelerator.log(eval_metrics, step=global_step)
         n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
 
+        if max_val_acc is not None and best_val_acc >= max_val_acc:
+            log.info(f"Validation accuracy reached {max_val_acc}. Stopping training.")
+            break
+
     log.info(eval_metrics)
     accelerator.end_training()
 
@@ -762,6 +767,7 @@ def train_mamba(
     weight_decay: float = 0.01,
     compile: bool = False,
     gradient_clip: float | None = None,
+    max_val_acc: float | None = 0.99,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
@@ -805,6 +811,7 @@ def train_mamba(
         "k": k,
         "layer_norm_eps": layer_norm_eps,
         "lr": lr,
+        "max_val_acc": max_val_acc,
         "max_samples": max_samples,
         "n_layers": n_layers,
         "n_vocab": n_vocab,
@@ -981,6 +988,10 @@ def train_mamba(
         accelerator.log(eval_metrics, step=global_step)
         n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
 
+        if max_val_acc is not None and best_val_acc >= max_val_acc:
+            log.info(f"Validation accuracy reached {max_val_acc}. Stopping training.")
+            break
+
     log.info(eval_metrics)
     accelerator.end_training()
 
@@ -1012,6 +1023,7 @@ def train_srn(
     weight_decay: float = 0.01,
     compile: bool = False,
     gradient_clip: float | None = None,
+    max_val_acc: float | None = 0.99,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
@@ -1055,6 +1067,7 @@ def train_srn(
         "gradient_clip": gradient_clip,
         "k": k,
         "lr": lr,
+        "max_val_acc": max_val_acc,
         "max_samples": max_samples,
         "n_layers": n_layers,
         "n_vocab": n_vocab,
@@ -1240,6 +1253,10 @@ def train_srn(
         accelerator.log(eval_metrics, step=global_step)
         n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
 
+        if max_val_acc is not None and best_val_acc >= max_val_acc:
+            log.info(f"Validation accuracy reached {max_val_acc}. Stopping training.")
+            break
+
     log.info(eval_metrics)
     accelerator.end_training()
 
@@ -1270,6 +1287,7 @@ def train_gru(
     weight_decay: float = 0.01,
     compile: bool = False,
     gradient_clip: float | None = None,
+    max_val_acc: float | None = 0.99,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
@@ -1279,7 +1297,7 @@ def train_gru(
     """Train GRU model."""
     set_seed(seed)
 
-    accelerator = Accelerator(log_with="wandb") if logging else Accelerator(cpu=True)
+    accelerator = Accelerator(log_with="wandb") if logging else Accelerator()
     log.setLevel(log_level)
 
     # Load dataset
@@ -1312,6 +1330,7 @@ def train_gru(
         "gradient_clip": gradient_clip,
         "k": k,
         "lr": lr,
+        "max_val_acc": max_val_acc,
         "max_samples": max_samples,
         "n_layers": n_layers,
         "n_vocab": n_vocab,
@@ -1495,6 +1514,10 @@ def train_gru(
         accelerator.log(eval_metrics, step=global_step)
         n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
 
+        if max_val_acc is not None and best_val_acc >= max_val_acc:
+            log.info(f"Validation accuracy reached {max_val_acc}. Stopping training.")
+            break
+
     log.info(eval_metrics)
     accelerator.end_training()
 
@@ -1525,6 +1548,7 @@ def train_lstm(
     weight_decay: float = 0.01,
     compile: bool = False,
     gradient_clip: float | None = None,
+    max_val_acc: float | None = 0.99,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
@@ -1567,6 +1591,7 @@ def train_lstm(
         "gradient_clip": gradient_clip,
         "k": k,
         "lr": lr,
+        "max_val_acc": max_val_acc,
         "max_samples": max_samples,
         "n_layers": n_layers,
         "n_vocab": n_vocab,
@@ -1749,6 +1774,10 @@ def train_lstm(
         eval_metrics["val/best_sequence_accuracy"] = best_val_acc
         accelerator.log(eval_metrics, step=global_step)
         n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
+
+        if max_val_acc is not None and best_val_acc >= max_val_acc:
+            log.info(f"Validation accuracy reached {max_val_acc}. Stopping training.")
+            break
 
     log.info(eval_metrics)
     accelerator.end_training()
