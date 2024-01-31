@@ -151,9 +151,10 @@ def get_dataset(
     tokenizer_base.add_tokens(sorted(list(unique_tokens.keys()), key=lambda x: int(x)))
     tokenizer_base.add_special_tokens(SpecialTokens.values())
     tokenizer_base.post_processor = TemplateProcessing(
-        single=f"{SpecialTokens.CLS} $A",
+        single=f"{SpecialTokens.CLS} $A {SpecialTokens.EOS}",
         special_tokens=[
             (SpecialTokens.CLS, tokenizer_base.token_to_id(SpecialTokens.CLS)),
+            (SpecialTokens.EOS, tokenizer_base.token_to_id(SpecialTokens.EOS)),
         ],
     )
     tokenizer = PreTrainedTokenizerFast(
