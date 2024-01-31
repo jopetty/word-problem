@@ -151,10 +151,9 @@ def get_dataset(
     tokenizer_base.add_tokens(sorted(list(unique_tokens.keys()), key=lambda x: int(x)))
     tokenizer_base.add_special_tokens(SpecialTokens.values())
     tokenizer_base.post_processor = TemplateProcessing(
-        single=f"{SpecialTokens.BOS} $A {SpecialTokens.EOS}",
+        single=f"{SpecialTokens.CLS} $A",
         special_tokens=[
-            (SpecialTokens.BOS, tokenizer_base.token_to_id(SpecialTokens.BOS)),
-            (SpecialTokens.EOS, tokenizer_base.token_to_id(SpecialTokens.EOS)),
+            (SpecialTokens.CLS, tokenizer_base.token_to_id(SpecialTokens.CLS)),
         ],
     )
     tokenizer = PreTrainedTokenizerFast(
@@ -167,7 +166,7 @@ def get_dataset(
         mask_token=SpecialTokens.MASK.value,
         pad_token=SpecialTokens.PAD.value,
     )
-    tokenizer.padding_side = "left"
+    tokenizer.padding_side = "right"
     tokenize_map = partial(tokenize, tokenizer=tokenizer)
 
     # print(tokenizer)
@@ -314,7 +313,7 @@ def train_trns(
 
     model = EncoderSequenceClassifier(
         cl_dim=1,
-        cl_index=-1,
+        cl_index=0,
         d_model=d_model,
         n_heads=n_heads,
         d_ff=d_ff,
@@ -565,7 +564,7 @@ def train_mamba(
 
     model = MambaSequenceClassifier(
         cl_dim=1,
-        cl_index=-1,
+        cl_index=0,
         d_model=d_model,
         dropout=dropout,
         layer_norm_eps=layer_norm_eps,
