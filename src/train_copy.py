@@ -101,7 +101,6 @@ def pad_collate(
     collated = {
         "input_ids": torch.stack([s["input_ids"] for s in samples]),
         "labels": torch.stack([s["labels"] for s in samples]),
-        "attention_mask": torch.stack([s["attention_mask"] for s in samples]),
         "cls_index": torch.stack([s["cls_index"] for s in samples]),
     }
 
@@ -175,10 +174,6 @@ def get_dataset(
     )
     tokenizer.padding_side = "right"
     tokenize_map = partial(tokenize, tokenizer=tokenizer)
-
-    # print(tokenizer)
-
-    # raise SystemExit
 
     dataset = (
         load_dataset("csv", data_files=str(data_path), split="all")
@@ -394,26 +389,12 @@ def train_trns(
 
             source = batch["input_ids"]
             target = batch["labels"]
-
             cls_index = batch["cls_index"]
 
             if causal:
                 mask = torch.nn.Transformer.generate_square_subsequent_mask(
                     source.shape[1], device=device
                 )
-                # mask = torch.where(mask.isinf(), 0, 1)
-                # print(atn_mask[0])
-                # atn_mask = torch.where(atn_mask == 0, float("-inf"), float("nan"))
-                # print(atn_mask[0])
-
-                # print(source[0])
-                # print(cls_index[0])
-
-                # raise SystemExit
-
-                # comb_mask = atn_mask[:, None] * mask
-                # comb_mask = torch.where(comb_mask == 0, float("-inf"), float("nan"))
-
                 output = model(source, mask=mask, is_causal=True, index=cls_index)
             else:
                 output = model(source)
