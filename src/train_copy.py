@@ -102,6 +102,7 @@ def pad_collate(
         "input_ids": torch.stack([s["input_ids"] for s in samples]),
         "labels": torch.stack([s["labels"] for s in samples]),
         "attention_mask": torch.stack([s["attention_mask"] for s in samples]),
+        "cls_index": torch.stack([s["cls_index"] for s in samples]),
     }
 
     return collated
@@ -117,11 +118,12 @@ def tokenize(
         return_tensors="pt",
         padding=True,
     )
-    # tokenized.pop("attention_mask", None)
 
     tokenized["labels"] = example["target"]
 
-    print(tokenized)
+    tokenized["cls_index"] = torch.where(
+        tokenized["input_ids"] == tokenizer.cls_token_id, 1, 0
+    ).argmax(dim=1)
 
     return tokenized
 
@@ -154,10 +156,11 @@ def get_dataset(
     tokenizer_base.add_tokens(sorted(list(unique_tokens.keys()), key=lambda x: int(x)))
     tokenizer_base.add_special_tokens(SpecialTokens.values())
     tokenizer_base.post_processor = TemplateProcessing(
-        single=f"{SpecialTokens.BOS} $A {SpecialTokens.EOS}",
+        single=f"{SpecialTokens.BOS} $A {SpecialTokens.EOS} {SpecialTokens.CLS}",
         special_tokens=[
             (SpecialTokens.BOS, tokenizer_base.token_to_id(SpecialTokens.BOS)),
             (SpecialTokens.EOS, tokenizer_base.token_to_id(SpecialTokens.EOS)),
+            (SpecialTokens.CLS, tokenizer_base.token_to_id(SpecialTokens.CLS)),
         ],
     )
     tokenizer = PreTrainedTokenizerFast(
@@ -170,7 +173,7 @@ def get_dataset(
         mask_token=SpecialTokens.MASK.value,
         pad_token=SpecialTokens.PAD.value,
     )
-    tokenizer.padding_side = "left"
+    tokenizer.padding_side = "right"
     tokenize_map = partial(tokenize, tokenizer=tokenizer)
 
     # print(tokenizer)
@@ -252,7 +255,7 @@ def train_trns(
     compile: bool = False,
     causal: bool = True,
     gradient_clip: float | None = None,
-    max_val_acc: float | None = 0.99,
+    max_val_acc: float | None = 0.995,
     # Misc
     log_level: str = "INFO",
     seed: int = randint(0, 2**32 - 1),
@@ -318,7 +321,7 @@ def train_trns(
 
     model = EncoderSequenceClassifier(
         cl_dim=1,
-        cl_index=-1,
+        cl_index=None,
         d_model=d_model,
         n_heads=n_heads,
         d_ff=d_ff,
@@ -392,18 +395,26 @@ def train_trns(
             source = batch["input_ids"]
             target = batch["labels"]
 
-            atn_mask = batch["attention_mask"]
+            cls_index = batch["cls_index"]
 
             if causal:
                 mask = torch.nn.Transformer.generate_square_subsequent_mask(
                     source.shape[1], device=device
                 )
-                mask = torch.where(mask.isinf(), 0, 1)
+                # mask = torch.where(mask.isinf(), 0, 1)
+                # print(atn_mask[0])
+                # atn_mask = torch.where(atn_mask == 0, float("-inf"), float("nan"))
+                # print(atn_mask[0])
 
-                comb_mask = atn_mask[:, None] * mask
-                comb_mask = torch.where(comb_mask == 0, float("-inf"), float("nan"))
+                # print(source[0])
+                # print(cls_index[0])
 
-                output = model(source, mask=comb_mask, is_causal=True)
+                # raise SystemExit
+
+                # comb_mask = atn_mask[:, None] * mask
+                # comb_mask = torch.where(comb_mask == 0, float("-inf"), float("nan"))
+
+                output = model(source, mask=mask, is_causal=True, index=cls_index)
             else:
                 output = model(source)
 
@@ -445,12 +456,13 @@ def train_trns(
         for batch in tqdm(eval_dataloader, desc="Eval", position=1, leave=False):
             source = batch["input_ids"]
             target = batch["labels"]
+            cls_index = batch["cls_index"]
             with torch.no_grad():
                 if causal:
                     mask = torch.nn.Transformer.generate_square_subsequent_mask(
                         source.shape[1], device=device
                     )
-                    output = model(source, mask=mask, is_causal=True)
+                    output = model(source, mask=mask, is_causal=True, index=cls_index)
                 else:
                     output = model(source)
 
