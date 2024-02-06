@@ -165,4 +165,4 @@ scratchpad.ipynb
 .ruff_cache/
 overlay-15GB-500K.ext3
 outputs/
-word-problem/Miniconda3-latest-Linux-x86_64.sh
+Miniconda3-latest-Linux-x86_64.sh
