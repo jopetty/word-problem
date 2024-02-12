@@ -206,7 +206,7 @@ def get_dataset(
         mask_token=SpecialTokens.MASK.value,
         pad_token=SpecialTokens.PAD.value,
     )
-    tokenizer.padding_side = "left"
+    tokenizer.padding_side = "right"
     tokenize_map = partial(tokenize, tokenizer=tokenizer, supervised=supervised)
 
     # Construct dataset
@@ -360,6 +360,8 @@ def train_mlp(
 
     log.info(f"Config: {pformat(project_hps)}")
     log.info(f"Dataset: {dataset}")
+
+    raise NotImplementedError("Upgrade to variable-cls index classifier!")
 
     model = MLPSequenceClassifier(
         d_model=d_model,
@@ -561,6 +563,7 @@ def train_trns(
             bias=bias,
         )
     else:
+        raise NotImplementedError("Upgrade to variable-cls index classifier!")
         model = EncoderSequenceClassifier(
             cl_dim=1,
             cl_index=0,
@@ -846,6 +849,7 @@ def train_mamba(
             residual_in_fp32=residual_in_fp32,
         )
     else:
+        raise NotImplementedError("Upgrade to variable-cls index classifier!")
         raise NotImplementedError("SSMs only support Tagging")
 
     if compile:
@@ -1101,6 +1105,7 @@ def train_srn(
             weight_scale=weight_scale,
         )
     else:
+        raise NotImplementedError("Upgrade to variable-cls index classifier!")
         model = SRNSequenceClassifier(
             activation=activation,
             batch_first=True,
@@ -1363,6 +1368,7 @@ def train_gru(
             weight_scale=weight_scale,
         )
     else:
+        raise NotImplementedError("Upgrade to variable-cls index classifier!")
         model = GRUSequenceClassifier(
             batch_first=True,
             bias=bias,
@@ -1624,6 +1630,7 @@ def train_lstm(
             weight_scale=weight_scale,
         )
     else:
+        raise NotImplementedError("Upgrade to variable-cls index classifier!")
         model = LSTMSequenceClassifier(
             batch_first=True,
             bias=bias,
