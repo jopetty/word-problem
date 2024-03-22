@@ -16,6 +16,7 @@ dependencies = [
     "datasets >= 2.15",
     "evaluate >= 0.4",
     "fire >= 0.5",
+    "s4 @ git+https://github.com/jopetty/s4.git",
     "abstract_algebra @ git+https://github.com/jopetty/abstract_algebra",
     "sfirah [ssm] @ git+https://github.com/jopetty/sfirah ; sys_platform != 'darwin'",
     "sfirah @ git+https://github.com/jopetty/sfirah ; sys_platform == 'darwin'",
