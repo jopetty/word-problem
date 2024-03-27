@@ -1267,8 +1267,8 @@ def train_ids4(
     tagging: bool = True,
     max_samples: int | None = None,
     # Model parameters
-    d_model: int = 128,
-    d_state: int = 64,
+    d_model: int = 255,  # weird value, approximates default transformer num_params
+    d_state: int = 110,  # weird value, approximates default transformer num_params
     dropout: float = 0.0,
     n_layers: int = 1,
     bias: bool = True,
