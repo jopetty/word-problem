@@ -37,6 +37,7 @@ from sfirah.rnn import (
     SRNTokenClassifier,
 )
 from sfirah.s4 import S4TokenClassifier
+from sfirah.ids4 import IDS4TokenClassifier
 from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifier
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
@@ -1254,6 +1255,258 @@ def train_s4(
 
     log.info(eval_metrics)
     accelerator.end_training()
+
+
+def train_ids4(
+    # Data parameters
+    group: str,
+    k: int,
+    data_dir: Path = PROJECT_ROOT / "data",
+    strict_len: bool = False,
+    train_size: float = 0.8,
+    tagging: bool = True,
+    max_samples: int | None = None,
+    # Model parameters
+    d_model: int = 255,  # weird value, approximates default transformer num_params
+    d_state: int = 110,  # weird value, approximates default transformer num_params
+    dropout: float = 0.0,
+    n_layers: int = 1,
+    bias: bool = True,
+    prenorm: bool = False,
+    # Training parameters
+    epochs: int = 500,
+    batch_size: int = 32,
+    lr: float = 1e-4,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    op_eps: float = 1e-8,
+    weight_decay: float = 0.01,
+    compile: bool = False,
+    gradient_clip: float | None = None,
+    max_val_acc: float | None = 0.99,
+    # Misc
+    log_level: str = "INFO",
+    seed: int = randint(0, 2**32 - 1),
+    project_name: str = "word_problem_ids4",
+    logging: bool = True,
+):
+    """Train Mamba model."""
+    set_seed(seed)
+
+    accelerator = Accelerator(log_with="wandb") if logging else Accelerator()
+    log.setLevel(log_level)
+
+    # Load dataset
+    datadict = get_dataset(
+        group=group,
+        k=k,
+        strict_len=strict_len,
+        train_size=train_size,
+        data_dir=data_dir,
+        supervised=tagging,
+        max_samples=max_samples,
+    )
+    dataset = datadict["dataset"]
+    n_vocab = datadict["n_vocab"]
+    tokenizer = datadict["tokenizer"]
+    collate_fn = partial(pad_collate, pad_token_id=tokenizer.pad_token_id)
+
+    # Set up logger
+    project_hps = {
+        "batch_size": batch_size,
+        "betas": (beta1, beta2),
+        "bias": bias,
+        "compile": compile,
+        "d_model": d_model,
+        "d_state": d_state,
+        "dropout": dropout,
+        "epochs": epochs,
+        "eps": op_eps,
+        "group": group,
+        "gradient_clip": gradient_clip,
+        "k": k,
+        "lr": lr,
+        "max_val_acc": max_val_acc,
+        "max_samples": max_samples,
+        "n_layers": n_layers,
+        "n_vocab": n_vocab,
+        "prenorm": prenorm,
+        "seed": seed,
+        "strict_len": strict_len,
+        "tagging": tagging,
+        "train_size": train_size,
+        "weight_decay": weight_decay,
+    }
+
+    accelerator.init_trackers(
+        project_name,
+        config=project_hps,
+    )
+
+    log.info(f"Config: {pformat(project_hps)}")
+    log.info(f"Dataset: {dataset}")
+
+    # Construct model
+    if tagging:
+        model = IDS4TokenClassifier(
+            d_model=d_model,
+            dropout=dropout,
+            n_layers=n_layers,
+            n_vocab=n_vocab,
+            d_state=d_state,
+            bias=bias,
+            prenorm=prenorm,
+        )
+    else:
+        raise NotImplementedError("IDS4 only support Tagging")
+
+    if compile:
+        log.info("Compiling model...")
+        model = torch.compile(model)
+        log.info("Model compiled!")
+
+    log.info(f"Model: {model}")
+    log.info(
+        f"Number of parameters: {humanize.intword(model.num_parameters)}"
+        f" ({model.num_parameters})"
+    )
+    log.info(f"Accelerator state: {accelerator.state}")
+
+    device = accelerator.device
+
+    model = model.to(device)
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=lr,
+        betas=(beta1, beta2),
+        eps=op_eps,
+        weight_decay=weight_decay,
+    )
+    if train_size < 1:
+        train_dataloader = DataLoader(
+            dataset["train"],
+            shuffle=True,
+            batch_size=batch_size,
+            collate_fn=collate_fn,
+        )
+        eval_dataloader = DataLoader(
+            dataset["test"],
+            shuffle=False,
+            batch_size=batch_size,
+            collate_fn=collate_fn,
+        )
+    else:
+        train_dataloader = DataLoader(
+            dataset,
+            shuffle=True,
+            batch_size=batch_size,
+            collate_fn=collate_fn,
+        )
+        eval_dataloader = DataLoader(
+            dataset,
+            shuffle=True,
+            batch_size=batch_size,
+            collate_fn=collate_fn,
+        )
+
+    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
+        model, optimizer, train_dataloader, eval_dataloader
+    )
+
+    metric_fns = {
+        "loss": ce_loss,
+        "sequence_accuracy": token_accuracy,
+    }
+
+    if tagging:
+        metric_fns["sequence_accuracy"] = sequence_accuracy
+        metric_fns["token_accuracy"] = token_accuracy
+
+    global_step = 0
+    best_val_acc = 0.0
+    for epoch in (n_bar := tqdm(range(epochs), desc="Epochs", position=0, leave=False)):
+        model.train()
+        train_results = []
+        for batch in (
+            t_bar := tqdm(train_dataloader, desc="Train", position=1, leave=False)
+        ):
+            global_step += 1
+            optimizer.zero_grad()
+
+            source = batch["input_ids"]
+            target = batch["labels"]
+
+            output = model(source)
+
+            predictions, references = accelerator.gather_for_metrics((output, target))
+            train_results.append(
+                compute_metrics(
+                    [(predictions, references)],
+                    tokenizer=tokenizer,
+                    metric_fns=metric_fns,
+                    prefix="train",
+                )
+            )
+
+            target = target.flatten()
+            output = output.flatten(end_dim=-2)
+            loss = F.cross_entropy(output, target)
+
+            if global_step % 100 == 0:
+                log.debug(f"preds: {predictions.argmax(dim=-1)}")
+                log.debug(f"trgts: {references}")
+
+            accelerator.backward(loss)
+
+            if gradient_clip is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), gradient_clip, norm_type=2.0
+                )
+
+            optimizer.step()
+
+            t_bar.set_postfix({"loss": f"{loss.item():.5f}"})
+
+        accelerator.log({"epoch": epoch}, step=global_step)
+        accelerator.log(reduce_metrics(train_results), step=global_step)
+
+        model.eval()
+        eval_results = []
+        for batch in tqdm(eval_dataloader, desc="Eval", position=1, leave=False):
+            source = batch["input_ids"]
+            target = batch["labels"]
+            with torch.no_grad():
+                output = model(source)
+
+            predictions, references = accelerator.gather_for_metrics((output, target))
+
+            eval_results.append(
+                compute_metrics(
+                    [(predictions, references)],
+                    prefix="val",
+                    tokenizer=tokenizer,
+                    metric_fns=metric_fns,
+                )
+            )
+
+        eval_metrics = reduce_metrics(eval_results)
+
+        if eval_metrics["val/sequence_accuracy"] > best_val_acc:
+            best_val_acc = eval_metrics["val/sequence_accuracy"]
+
+            # TODO: model checkpointing logic here
+
+        eval_metrics["val/best_sequence_accuracy"] = best_val_acc
+        accelerator.log(eval_metrics, step=global_step)
+        n_bar.set_postfix({"val/acc": f"{eval_metrics['val/sequence_accuracy']:.3f}"})
+
+        if max_val_acc is not None and best_val_acc >= max_val_acc:
+            log.info(f"Validation accuracy reached {max_val_acc}. Stopping training.")
+            break
+
+    log.info(eval_metrics)
+    accelerator.end_training()
+
 
 
 def train_srn(
