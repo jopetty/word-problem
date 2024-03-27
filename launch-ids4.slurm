@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=wp-s4
+#SBATCH --job-name=wp-ids4
 #SBATCH --open-mode=append
 #SBATCH --output=outputs/%j_%x.out
 #SBATCH --error=outputs/%j_%x.err

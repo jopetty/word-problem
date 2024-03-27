@@ -59,6 +59,8 @@ try:
     from sfirah.ssm import MambaTokenClassifier
 except ModuleNotFoundError:
     print("You must install `sfirah[ssm]` to use state-space models.")
+except ImportError:
+    print("Lol good luck fam~")
 
 PROJECT_ROOT = path = pyrootutils.find_root(
     search_from=__file__, indicator=".project-root"
@@ -1012,9 +1014,9 @@ def train_s4(
     tagging: bool = True,
     max_samples: int | None = None,
     # Model parameters
-    d_model: int = 128,
-    d_state: int = 64,
-    transposed: bool = True,
+    d_model: int = 1174,
+    # d_state: int = 64,
+    # transposed: bool = True,
     dropout: float = 0.0,
     n_layers: int = 1,
     prenorm: bool = False,
@@ -1064,7 +1066,7 @@ def train_s4(
         "bias": bias,
         "compile": compile,
         "d_model": d_model,
-        "d_state": d_state,
+        # "d_state": d_state,
         "dropout": dropout,
         "epochs": epochs,
         "eps": op_eps,
@@ -1081,7 +1083,7 @@ def train_s4(
         "strict_len": strict_len,
         "tagging": tagging,
         "train_size": train_size,
-        "transponsed": transposed,
+        # "transponsed": transposed,
         "weight_decay": weight_decay,
     }
 
@@ -1100,10 +1102,8 @@ def train_s4(
             dropout=dropout,
             n_layers=n_layers,
             n_vocab=n_vocab,
-            lr=lr,
-            d_state=d_state,
             prenorm=prenorm,
-            transposed=transposed,
+            # transposed=transposed,
             bias=bias,
         )
     else:
