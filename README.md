@@ -71,3 +71,56 @@ By default, we include data files for `Z60`, `A4_x_Z5`, and `A5` for sequence le
 ### Logging
 
 Run data is logged to Weights&Biases; add `WANDB_API_KEY=##################` to a `.env` file in the root directory of the project to automatically configure the W&B logger. If you don't want to log runs to W&B, pass the `--nologging` flag.
+
+
+## Setting up on SLURM
+
+Refer to [the NYU HPC/Singularity Guide](https://sites.google.com/nyu.edu/nyu-hpc/hpc-systems/greene/software/singularity-with-miniconda) for more thorough instructions.
+
+1. Clone this repository to scratch (e.g., `/scratch/NetID/word-problem`). `cd` into this directory.
+2. Copy the default singularity overlay:
+
+```bash
+cp -rp /scratch/work/public/overlay-fs-ext3/overlay-15GB-500K.ext3.gz .
+gunzip overlay-15GB-500K.ext3.gz
+```
+
+3. Launch the Singularity container in read-write mode:
+```bash
+singularity exec --overlay overlay-15GB-500K.ext3:rw /scratch/work/public/singularity/cuda11.6.124-cudnn8.4.0.27-devel-ubuntu20.04.4.sif /bin/bash
+```
+
+4. Install Miniconda:
+```bash
+wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh -b -p /ext3/miniconda3
+# rm Miniconda3-latest-Linux-x86_64.sh # if you don't need this file any longer
+```
+
+5. Create the `/ext3/env.sh` activation script:
+
+```bash
+vim /ext3/env.sh
+```
+
+Enter and save the following:
+
+```bash
+#!/bin/bash
+
+source /ext3/miniconda3/etc/profile.d/conda.sh
+export PATH=/ext3/miniconda3/bin:$PATH
+export PYTHONPATH=/ext3/miniconda3/bin:$PATH
+```
+
+5. Install the Conda environment:
+```bash
+source /ext3/env.sh
+conda env create -f environment.yml
+```
+
+This should install all dependencies inside the `wp` environment.
+
+NOTE: I'm not 100% certain if this will install the appropriate CUDA libraries if you are not running this from a GPU node. To make sure this works, you can `srun` a job on a GPU, launch the Singularity container, `source /ext3/env.sh`, and then load up a Python REPL, `import torch`, and confirm GPU access by running `torch.cuda.is_available()`.
+
+Once you've done this, you should be able to run, e.g., `bash run-ids4.sh` to launch all the training jobs.
