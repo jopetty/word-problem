@@ -12,13 +12,14 @@ singularity exec --nv --overlay overlay-15GB-500K.ext3:ro /scratch/work/public/s
 source /ext3/env.sh
 conda activate wp
 
-python src/main.py train \
-    --project_name word_problem \
+python src/main.py train_trns \
     --group $group \
     --k $k \
     --batch_size $batchsize \
     --weight_decay $wd \
     --n_layers $layers \
     --max_samples $samples \
+    --strict_len \
+    --lr 5e-5 \
     --weight_sharing $wsharing \
 "
