@@ -18,5 +18,9 @@ python src/main.py train_mamba \
     --batch_size $batchsize \
     --weight_decay $wd \
     --n_layers $layers \
-    --strict_len
+    --max_samples $samples \
+    --d_model 698 \
+    --strict_len \
+    --weight_sharing $wsharing \
 "
+
