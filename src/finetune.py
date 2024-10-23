@@ -7,7 +7,6 @@ from torch.utils.data import Dataset
 import os
 import numpy as np
 import wandb
-import subprocess
 
 from transformers import (
     AutoTokenizer,
@@ -20,7 +19,6 @@ from transformers import (
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-os.environ["WANDB_API_KEY"] = subprocess.check_output("beaker secret read WANDB_API_KEY", shell=True).decode("utf-8")
 os.environ["WANDB_PROJECT"] = "log-depth"
 os.environ["WANDB_LOG_MODEL"] = "checkpoint"
 

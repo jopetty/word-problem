@@ -1,14 +1,14 @@
 #!/bin/bash
 
 ROOT=${ROOT:-"/net/nfs.cirrascale/allennlp/willm/log-depth"}
-SUFFIX=${SUFFIX:""}
+SUFFIX=${SUFFIX:""}  # Can set to "-deduped"
 # SIZES=("70m" "160m" "410m" "1b" "1.4b" "2.8b" "6.9b" "12b")
 # SIZES=("70m" "160m" "410m")
 SIZES=("70m")
 
 mkdir $OUT_DIR/$SAVE
-for idx in "${!SIZES[@]}"; do
-    model="pythia-${SIZES[idx]}$SUFFIX"
+for size in "${SIZES[@]}"; do
+    model="pythia-$size$SUFFIX"
     echo "===== $model ====="
     printf "$model" | gantry run \
         --workspace ai2/rusty-dawg \

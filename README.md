@@ -137,8 +137,7 @@ To generate data:
 ROOT="/net/nfs.cirrascale/allennlp/willm/log-depth"
 N_TRAIN=1000000
 N_VAL=1000
-KS=("8" "16" "32" "64" "256" "512" "1024")
-KS=("2")
+KS=("2" "4" "8" "16" "32" "64" "128")
 
 for k in "${KS[@]}"; do
     mkdir $ROOT/data/$k
