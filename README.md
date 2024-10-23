@@ -125,7 +125,12 @@ NOTE: I'm not 100% certain if this will install the appropriate CUDA libraries i
 
 Once you've done this, you should be able to run, e.g., `bash run-ids4.sh` to launch all the training jobs.
 
-## Will's Extensions
+## Will's Finetuning Experiments
+
+I removed the following line from pyproject.toml since we don't need SSM dependencies:
+```
+    "sfirah [ssm] @ git+https://github.com/jopetty/sfirah ; sys_platform != 'darwin'",
+```
 
 Switching to using Gantry to run finetuning:
 
