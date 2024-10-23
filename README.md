@@ -127,5 +127,8 @@ Once you've done this, you should be able to run, e.g., `bash run-ids4.sh` to la
 
 ## Will's Extensions
 
+Switching to using Gantry to run finetuning:
+
 ```shell
+./finetune.sh
 ```
