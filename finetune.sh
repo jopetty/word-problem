@@ -6,8 +6,6 @@ SUFFIX=${SUFFIX:""}
 # SIZES=("70m" "160m" "410m")
 SIZES=("70m")
 
-# FIXME: Only log the last one.
-
 mkdir $OUT_DIR/$SAVE
 for idx in "${!SIZES[@]}"; do
     model="pythia-${SIZES[idx]}$SUFFIX"
