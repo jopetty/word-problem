@@ -5,6 +5,7 @@ import random
 from functools import reduce
 from itertools import product
 from pathlib import Path
+from tqdm import tqdm
 
 import fire
 import polars as pl
@@ -95,7 +96,7 @@ def main(
         sequences = list(sequences)
 
     examples = []
-    for seq in sequences:
+    for seq in tqdm(sequences):
         acc = 0
         scanned = [acc := group_reduce(lhs=acc, rhs=x, G=group_prod) for x in seq]
         examples.append(

@@ -124,3 +124,8 @@ This should install all dependencies inside the `wp` environment.
 NOTE: I'm not 100% certain if this will install the appropriate CUDA libraries if you are not running this from a GPU node. To make sure this works, you can `srun` a job on a GPU, launch the Singularity container, `source /ext3/env.sh`, and then load up a Python REPL, `import torch`, and confirm GPU access by running `torch.cuda.is_available()`.
 
 Once you've done this, you should be able to run, e.g., `bash run-ids4.sh` to launch all the training jobs.
+
+## Will's Extensions
+
+```shell
+```
