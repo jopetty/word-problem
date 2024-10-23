@@ -15,7 +15,8 @@ for idx in "${!SIZES[@]}"; do
     printf "$model" | gantry run \
         --workspace ai2/rusty-dawg \
         --cluster ai2/allennlp-cirrascale \
-        --venv base \
+        --beaker-image willm/log-depth \
+        --venv wp \
         --budget ai2/allennlp \
         --priority normal \
         --gpus 1 -- python src/finetune.py \
