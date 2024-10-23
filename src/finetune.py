@@ -135,7 +135,7 @@ def main(args):
         )
         trainer = Trainer(
             model=model,
-            args=TrainingArguments(**args),
+            args=args,
             train_dataset=GroupDataset.from_csv(train_path, tokenizer),
             eval_dataset=GroupDataset.from_csv(val_path, tokenizer),
             compute_metrics=evaluator.compute_metrics,
@@ -143,7 +143,7 @@ def main(args):
         trainer.add_callback(WandbStepCallback(global_step))
         trainer.train()
         global_step = trainer.state.global_step
-        wandb.log({f"step-phase{idx}": global_step})
+        wandb.log({f"step-{phase_name}": global_step})
 
 if __name__ == "__main__":
     main(parse_args())
