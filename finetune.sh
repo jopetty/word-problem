@@ -19,12 +19,15 @@ for idx in "${!SIZES[@]}"; do
         --priority normal \
         --gpus 1 -- python src/finetune.py \
             --model "EleutherAI/$model" \
+            --phase-name \
+                length4 \
+                length128 \
             --train-path \
-                $ROOT/data/log-depth/4/train.csv \
-                $ROOT/data/log-depth/128/train.csv \
+                $ROOT/data/4/train.csv \
+                $ROOT/data/128/train.csv \
             --val-path \
-                $ROOT/data/log-depth/128/val.csv \
-                $ROOT/data/log-depth/128/val.csv \
+                $ROOT/data/128/val.csv \
+                $ROOT/data/128/val.csv \
             --results-dir $ROOT/$model \
             --logs-dir $ROOT/$model/logs \
             --batch-size 64 \

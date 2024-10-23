@@ -6,12 +6,14 @@ import pandas as pd
 from torch.utils.data import Dataset
 import os
 import numpy as np
+import wandb
 
 from transformers import (
     AutoTokenizer,
     AutoModelForTokenClassification,
     TrainingArguments,
     Trainer,
+    TrainerCallback,
 )
 
 log = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ os.environ["WANDB_LOG_MODEL"] = "checkpoint"
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="EleutherAI/pythia-70m")
+    parser.add_argument("--phase-name", type=str, nargs="+", required=True)
     parser.add_argument("--train-path", type=str, nargs="+", required=True)
     parser.add_argument("--val-path", type=str, nargs="+", required=True)
     parser.add_argument("--results-dir", type=str, required=True)
@@ -93,6 +96,17 @@ class Evaluator:
             results[f"n@{eps}"] = failures.min().item() if len(failures) > 0 else len(accs_by_idx)
         return results
 
+class WandbStepCallback(TrainerCallback):
+    def __init__(self, global_step: int):
+        self.global_step = global_step
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is not None:
+            # Adjust the step to continue from phase 1
+            adjusted_step = self.global_step + state.global_step
+            logs['step'] = adjusted_step
+            wandb.log(logs)
+
 def main(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     evaluator = Evaluator(args.indices, args.eps)
@@ -100,18 +114,19 @@ def main(args):
     if torch.cuda.is_available():
         model.to("cuda")
 
-    for idx, (train_path, val_path) in enumerate(zip(args.train_path, args.val_path)):
-        log.info(f"Training on {train_path}...")
-        training_args = TrainingArguments(
+    global_step = 0
+    for phase_name, train_path, val_path in zip(args.phase_name, args.train_path, args.val_path):
+        run_name = args.model.split("/")[-1]
+        log.info(f"Training {run_name} on {train_path}...")
+        args = TrainingArguments(
             output_dir=args.results_dir,
             logging_dir=args.logs_dir,
             num_train_epochs=args.n_epochs,
             per_device_train_batch_size=args.batch_size,
             per_device_eval_batch_size=args.batch_size,
             weight_decay=0.01,
-            # warmup_steps=500,
             report_to="wandb",
-            run_name=args.model.split("/")[-1] + f"-phase{idx}",
+            run_name=run_name,
             logging_steps=args.log_steps,
             eval_strategy="steps",
             eval_steps=args.eval_steps,
@@ -120,12 +135,15 @@ def main(args):
         )
         trainer = Trainer(
             model=model,
-            args=training_args,
+            args=TrainingArguments(**args),
             train_dataset=GroupDataset.from_csv(train_path, tokenizer),
             eval_dataset=GroupDataset.from_csv(val_path, tokenizer),
             compute_metrics=evaluator.compute_metrics,
         )
+        trainer.add_callback(WandbStepCallback(global_step))
         trainer.train()
+        global_step = trainer.state.global_step
+        wandb.log({f"step-phase{idx}": global_step})
 
 if __name__ == "__main__":
     main(parse_args())
