@@ -118,7 +118,7 @@ def main(args):
     for phase_name, train_path, val_path in zip(args.phase_name, args.train_path, args.val_path):
         run_name = args.model.split("/")[-1]
         log.info(f"Training {run_name} on {train_path}...")
-        args = TrainingArguments(
+        training_args = TrainingArguments(
             output_dir=args.results_dir,
             logging_dir=args.logs_dir,
             num_train_epochs=args.n_epochs,
@@ -135,7 +135,7 @@ def main(args):
         )
         trainer = Trainer(
             model=model,
-            args=args,
+            args=training_args,
             train_dataset=GroupDataset.from_csv(train_path, tokenizer),
             eval_dataset=GroupDataset.from_csv(val_path, tokenizer),
             compute_metrics=evaluator.compute_metrics,
@@ -143,7 +143,7 @@ def main(args):
         trainer.add_callback(WandbStepCallback(global_step))
         trainer.train()
         global_step = trainer.state.global_step
-        wandb.log({f"step-{phase_name}": global_step})
+        wandb.log({"phase": phase_name})
 
 if __name__ == "__main__":
     main(parse_args())
