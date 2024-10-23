@@ -51,12 +51,14 @@ def main(
     k: int | list[int] = 10,
     samples: int | None = None,
     data_dir: str | Path = PROJECT_ROOT / "data",
+    data_path: str | Path | None = None,
     seed: int = random.randint(0, 1_000_000),
     overwrite: bool = False,
 ):
     """Generate data for the group sequence prediction task."""
-    data_path = data_dir / f"{group}={k}.csv"
-    if data_path.exists() and not overwrite:
+    if data_path is None:
+        data_path = data_dir / f"{group}={k}.csv"
+    if os.path.exists(data_path) and not overwrite:
         print(
             f"Data already exists at {data_path}. Use `--overwrite` to regenerate file."
         )

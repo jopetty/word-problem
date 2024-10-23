@@ -132,6 +132,21 @@ I removed the following line from pyproject.toml since we don't need SSM depende
     "sfirah [ssm] @ git+https://github.com/jopetty/sfirah ; sys_platform != 'darwin'",
 ```
 
+To generate data:
+```shell
+ROOT="/net/nfs.cirrascale/allennlp/willm/log-depth"
+N_TRAIN=1000000
+N_VAL=1000
+KS=("8" "16" "32" "64" "256" "512" "1024")
+KS=("2")
+
+for k in "${KS[@]}"; do
+    mkdir $ROOT/data/$k
+    python src/generate_data.py A5 --k $k --data-path $ROOT/data/$k/train.csv --samples $N_TRAIN
+    python src/generate_data.py A5 --k $k --data-path $ROOT/data/$k/val.csv --samples $N_VAL
+done
+```
+
 Switching to using Gantry to run finetuning:
 
 ```shell
