@@ -1,7 +1,12 @@
 name: wp
 
+channels:
+  - pytorch
+  - nvidia  # Required for cudatoolkit
+
 dependencies:
   - python=3.11
+  - cudatoolkit=11.8
   - pip
   - pip:
     - .
