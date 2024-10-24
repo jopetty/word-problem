@@ -2,13 +2,13 @@
 
 ROOT=${ROOT:-"/net/nfs.cirrascale/allennlp/willm/log-depth"}
 SUFFIX=${SUFFIX:""}  # Can set to "-deduped"
-GPUS=2
 # SIZES=("14m" "31m" "70m" "160m" "410m" "1b" "1.4b" "2.8b" "6.9b" "12b")
-SIZES=("1b" "1.4b" "2.8b")
+SIZES=("14m" "31m" "1b" "1.4b" "2.8b")
+GPUS=(1 1 2 2 2)
 
 mkdir $OUT_DIR/$SAVE
-for size in "${SIZES[@]}"; do
-    model="pythia-$size$SUFFIX"
+for idx in "${!SIZES[@]}"; do
+    model="pythia-${SIZES[idx]}$SUFFIX"
     echo "===== $model ====="
     printf "$model" | gantry run \
         --workspace ai2/rusty-dawg \
@@ -16,7 +16,7 @@ for size in "${SIZES[@]}"; do
         --budget ai2/allennlp \
         --priority normal \
         --env-secret "WANDB_API_KEY=WANDB_API_KEY" \
-        --gpus $GPUS -- python src/finetune.py \
+        --gpus ${GPUS[idx]} -- python src/finetune.py \
             --model "EleutherAI/$model" \
             --train-paths \
                 $ROOT/data/2/train.csv \

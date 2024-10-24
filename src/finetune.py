@@ -59,20 +59,13 @@ class GroupDataset(Dataset):
     def __getitem__(self, idx):
         input_text = self.csv.input[idx]
         target_text = self.csv.target[idx]
-
+        # Pythia tokenizer seems to correctly map each integer to its own token.
         input_ids = self.tokenizer(input_text).input_ids
+        # Convert to list of integers in range [0, group_size).
         labels = [int(x) for x in target_text.split()]
-        if len(input_ids) != len(labels):
-            breakpoint()
-
-        assert len(input_ids) == len(labels), f"Input and target lengths do not match: {len(input_ids)} != {len(labels)}"
-
-        return {
-            # Pythia tokenizer seems to correctly map each integer to its own token.
-            "input_ids": self.tokenizer(input_text).input_ids,
-            # Convert to list of integers in range [0, group_size).
-            "labels": [int(x) for x in target_text.split()],
-        }
+        assert len(input_ids) == len(labels), \
+            f"Input and target lengths do not match: {len(input_ids)} != {len(labels)}"
+        return {"input_ids": input_ids, "labels": labels}
 
 class Evaluator:
     def __init__(self, indices: list[int], eps: list[float]):
@@ -114,7 +107,7 @@ def main(args):
         model.to("cuda")
 
     global_step = 0
-    for idx, train_path in zip(args.train_paths):
+    for idx, train_path in enumerate(args.train_paths):
         run_name = args.model.split("/")[-1]
         log.info(f"Training {run_name} on {train_path}...")
         training_args = TrainingArguments(
