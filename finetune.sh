@@ -2,9 +2,9 @@
 
 ROOT=${ROOT:-"/net/nfs.cirrascale/allennlp/willm/log-depth"}
 SUFFIX=${SUFFIX:""}  # Can set to "-deduped"
-GPUS=1
+GPUS=2
 # SIZES=("14m" "31m" "70m" "160m" "410m" "1b" "1.4b" "2.8b" "6.9b" "12b")
-SIZES=("14m" "31m")
+SIZES=("1b" "1.4b" "2.8b")
 
 mkdir $OUT_DIR/$SAVE
 for size in "${SIZES[@]}"; do
