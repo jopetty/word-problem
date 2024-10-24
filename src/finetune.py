@@ -32,9 +32,10 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--log-steps", type=int, default=100)
     parser.add_argument("--eval-steps", type=int, default=100)
-    parser.add_argument("--warmup-steps", type=int, default=0)
+    parser.add_argument("--warmup-steps", type=int, default=500)
+    parser.add_argument("--lr-schedule", type=str, choices=["linear", "constant"], default="linear")
     # These parameters are pretty stable/not worth changing.
-    parser.add_argument("--save-steps", type=int, default=10000)
+    parser.add_argument("--save-steps", type=int, default=-1)
     parser.add_argument("--eval-batch-size", type=int, default=100)
     parser.add_argument("--n-epochs", type=int, default=1)
     parser.add_argument("--group-size", type=int, default=60)
@@ -116,11 +117,13 @@ def main(args):
             num_train_epochs=args.n_epochs,
             per_device_train_batch_size=args.batch_size,
             per_device_eval_batch_size=args.batch_size,
+            lr_scheduler_type=args.lr_schedule,
             weight_decay=0.01,
             report_to="wandb",
             run_name=run_name,
             logging_steps=args.log_steps,
             eval_strategy="steps",
+            save_strategy="steps" if args.save_steps > 0 else "no",
             eval_steps=args.eval_steps,
             save_steps=args.save_steps,
             warmup_steps=args.warmup_steps,

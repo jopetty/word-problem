@@ -33,5 +33,6 @@ for idx in "${!SIZES[@]}"; do
             --warmup-steps 500 \
             --log-steps 100 \
             --eval-steps 100 \
-            --indices 0 1 3 7 15 31 63 127
+            --indices 0 1 3 7 15 31 63 127 \
+            --lr-schedule "constant"
 done
