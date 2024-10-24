@@ -25,9 +25,9 @@ os.environ["WANDB_LOG_MODEL"] = "checkpoint"
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="EleutherAI/pythia-70m")
-    parser.add_argument("--phase-name", type=str, nargs="+", required=True)
-    parser.add_argument("--train-path", type=str, nargs="+", required=True)
-    parser.add_argument("--val-path", type=str, nargs="+", required=True)
+    parser.add_argument("--phase-names", type=str, nargs="+", required=True)
+    parser.add_argument("--train-paths", type=str, nargs="+", required=True)
+    parser.add_argument("--val-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
     parser.add_argument("--logs-dir", type=str, required=True)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument("--eval-steps", type=int, default=100)
     parser.add_argument("--warmup-steps", type=int, default=0)
     # These parameters are pretty stable/not worth changing.
-    parser.add_argument("--save-steps", type=int, default=2000)
+    parser.add_argument("--save-steps", type=int, default=10000)
     parser.add_argument("--eval-batch-size", type=int, default=100)
     parser.add_argument("--n-epochs", type=int, default=1)
     parser.add_argument("--group-size", type=int, default=60)
@@ -115,7 +115,7 @@ def main(args):
         model.to("cuda")
 
     global_step = 0
-    for phase_name, train_path, val_path in zip(args.phase_name, args.train_path, args.val_path):
+    for phase_name, train_path in zip(args.phase_names, args.train_paths):
         run_name = args.model.split("/")[-1]
         log.info(f"Training {run_name} on {train_path}...")
         training_args = TrainingArguments(
@@ -137,7 +137,7 @@ def main(args):
             model=model,
             args=training_args,
             train_dataset=GroupDataset.from_csv(train_path, tokenizer),
-            eval_dataset=GroupDataset.from_csv(val_path, tokenizer),
+            eval_dataset=GroupDataset.from_csv(args.val_path, tokenizer),
             compute_metrics=evaluator.compute_metrics,
         )
         trainer.add_callback(WandbStepCallback(global_step))
