@@ -25,7 +25,6 @@ os.environ["WANDB_LOG_MODEL"] = "checkpoint"
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="EleutherAI/pythia-70m")
-    parser.add_argument("--phase-names", type=str, nargs="+", required=True)
     parser.add_argument("--train-paths", type=str, nargs="+", required=True)
     parser.add_argument("--val-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
@@ -115,7 +114,7 @@ def main(args):
         model.to("cuda")
 
     global_step = 0
-    for phase_name, train_path in zip(args.phase_names, args.train_paths):
+    for idx, train_path in zip(args.train_paths):
         run_name = args.model.split("/")[-1]
         log.info(f"Training {run_name} on {train_path}...")
         training_args = TrainingArguments(
@@ -143,7 +142,7 @@ def main(args):
         trainer.add_callback(WandbStepCallback(global_step))
         trainer.train()
         global_step = trainer.state.global_step
-        wandb.log({"phase": phase_name})
+        wandb.log({"phase": idx})
 
 if __name__ == "__main__":
     main(parse_args())
