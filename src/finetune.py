@@ -27,6 +27,7 @@ os.environ["WANDB_LOG_MODEL"] = "checkpoint"
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="EleutherAI/pythia-70m")
+    parser.add_argument("--run-name", type=str, default=None)
     parser.add_argument("--train-paths", type=str, nargs="+", required=True)
     parser.add_argument("--eval-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
@@ -115,7 +116,7 @@ class WandbStepCallback(TrainerCallback):
         # Does this fix the weird `fake_trainer` issue?
         pass
 
-def get_model(args) -> tuple[str, nn.Model]:
+def get_model(args) -> tuple[str, torch.nn.Module]:
     if args.model == "sfirah":
         # raise NotImplementedError("sfirah models are not yet supported.")
         name = f"sfirah-w{args.d_model}-d{args.depth}"
@@ -142,6 +143,8 @@ def main(args):
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     evaluator = Evaluator(args.indices, args.eps)
     run_name, model = get_model(args)
+    if args.run_name is not None:
+        run_name = args.run_name
 
     # FIXME: Weird error with `fake_trainer` here with WANDB integration.
     wandb.init(

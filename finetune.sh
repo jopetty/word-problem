@@ -17,6 +17,7 @@ for size in "${SIZES[@]}"; do
         --env-secret "WANDB_API_KEY=WANDB_API_KEY" \
         --gpus $GPUS -- python src/finetune.py \
             --model "EleutherAI/$model" \
+            --run-name "$model" \
             --train-paths \
                 $ROOT/data/2/train.csv \
                 $ROOT/data/4/train.csv \

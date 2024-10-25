@@ -8,16 +8,17 @@ WIDTH=512
 GPUS=${GPUS:-1}
 
 for depth in "${DEPTHS[@]}"; do
-    model="pythia-$size$SUFFIX"
-    echo "===== $model ====="
-    printf "$model" | gantry run \
+    run_name="$MODEL-d$depth"
+    echo "===== $run_name ====="
+    printf $run_name | gantry run \
         --workspace ai2/rusty-dawg \
         --cluster ai2/allennlp-cirrascale \
         --budget ai2/allennlp \
         --priority normal \
         --env-secret "WANDB_API_KEY=WANDB_API_KEY" \
         --gpus $GPUS -- python src/finetune.py \
-            --model $MODEL \
+            --model "sfirah" \
+            --run-name $run_name \
             --d-model $WIDTH \
             --d-ff $D_FF \
             --depth $depth \
