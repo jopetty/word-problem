@@ -16,7 +16,7 @@ from transformers import (
     TrainerCallback,
 )
 
-# from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifier
+from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifier
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
@@ -117,18 +117,18 @@ class WandbStepCallback(TrainerCallback):
 
 def get_model(args) -> tuple[str, nn.Model]:
     if args.model == "sfirah":
-        raise NotImplementedError("sfirah models are not yet supported.")
-        # name = f"sfirah-w{args.d_model}-d{args.depth}"
-        # model = EncoderTokenClassifier(
-        #     d_model=args.d_model,
-        #     n_heads=args.n_heads,
-        #     d_ff=args.d_ff,
-        #     dropout=args.dropout,
-        #     norm_first=True,
-        #     n_layers=args.depth,
-        #     weight_sharing=args.universal,
-        #     weight_decay=args.weight_decay,
-        # )
+        # raise NotImplementedError("sfirah models are not yet supported.")
+        name = f"sfirah-w{args.d_model}-d{args.depth}"
+        model = EncoderTokenClassifier(
+            d_model=args.d_model,
+            n_heads=args.n_heads,
+            d_ff=args.d_ff,
+            dropout=args.dropout,
+            norm_first=True,
+            n_layers=args.depth,
+            weight_sharing=args.universal,
+            weight_decay=args.weight_decay,
+        )
     else:
         name = args.model.split("/")[-1]
         model = AutoModelForTokenClassification.from_pretrained(args.model, num_labels=args.group_size)
