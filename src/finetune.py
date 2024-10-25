@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 os.environ["WANDB_PROJECT"] = "log-depth"
-os.environ["WANDB_LOG_MODEL"] = "checkpoint"
+os.environ["WANDB_LOG_MODEL"] = "end"
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument("--eval-steps", type=int, default=100)
     parser.add_argument("--warmup-steps", type=int, default=500)
     parser.add_argument("--lr-schedule", type=str, choices=["linear", "constant"], default="linear")
+    parser.add_argument("--tags", type=str, nargs="+", default=[])
     # These parameters are pretty stable/not worth changing.
     parser.add_argument("--save-steps", type=int, default=-1)
     parser.add_argument("--eval-batch-size", type=int, default=100)
@@ -101,6 +102,14 @@ class WandbStepCallback(TrainerCallback):
             wandb.log(logs)
 
 def main(args):
+    run_name = args.model.split("/")[-1]
+    wandb.init(
+        project=os.environ["WANDB_PROJECT"],
+        name=run_name,
+        tags=args.tags,
+        group=run_name,
+    )
+
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     evaluator = Evaluator(args.indices, args.eps)
     model = AutoModelForTokenClassification.from_pretrained(args.model, num_labels=args.group_size)
@@ -109,7 +118,6 @@ def main(args):
 
     global_step = 0
     for idx, train_path in enumerate(args.train_paths):
-        run_name = args.model.split("/")[-1]
         log.info(f"Training {run_name} on {train_path}...")
         training_args = TrainingArguments(
             output_dir=args.results_dir,
