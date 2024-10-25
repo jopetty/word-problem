@@ -165,7 +165,7 @@ def main(args):
             per_device_train_batch_size=args.batch_size,
             per_device_eval_batch_size=args.batch_size,
             lr_scheduler_type=args.lr_schedule,
-            weight_decay=args.weight-decay,
+            weight_decay=args.weight_decay,
             run_name=run_name,
             logging_steps=args.log_steps,
             eval_strategy="steps",
