@@ -100,6 +100,10 @@ class WandbStepCallback(TrainerCallback):
             adjusted_step = self.global_step + state.global_step
             logs['step'] = adjusted_step
             wandb.log(logs)
+    
+    def on_train_end(self, args, state, control, **kwargs):
+        # Does this fix the weird `fake_trainer` issue?
+        pass
 
 def main(args):
     run_name = args.model.split("/")[-1]
