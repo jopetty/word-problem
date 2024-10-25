@@ -43,11 +43,12 @@ def parse_args():
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--dropout", type=float, default=0.)
     # These parameters are for randomly initialized models.
+    parser.add_argument("--sfirah", action="store_true", help="Use fresh model from sfirah codebase.")
     parser.add_argument("--d-model", type=int, default=512)
     parser.add_argument("--n-heads", type=int, default=8)
     parser.add_argument("--d-ff", type=int, default=2048)
     parser.add_argument("--depth", type=int, default=6)
-    parser.add_argument("--universal", action="store_true")
+    parser.add_argument("--universal", type=bool, default=False)
     # These parameters are pretty stable/not worth changing.
     parser.add_argument("--save-steps", type=int, default=-1)
     parser.add_argument("--eval-batch-size", type=int, default=100)
@@ -119,7 +120,7 @@ class WandbStepCallback(TrainerCallback):
         pass
 
 def get_model(args) -> tuple[str, torch.nn.Module]:
-    if args.model == "sfirah":
+    if args.sfirah:
         # raise NotImplementedError("sfirah models are not yet supported.")
         name = f"sfirah-w{args.d_model}-d{args.depth}"
         model = EncoderTokenClassifier(

@@ -151,5 +151,5 @@ Can easily launch finetuning, depth, and width jobs with the following:
 ```shell
 GPUS=1 log-depth/finetune.sh "14m" "31m" "70m" "160m"
 GPUS=1 log-depth/train-by-depth.sh 6 9 12 15 18 21 24
-GPUS=1 log-depth/train-by-width.sh 256 512 1024 2048 4096
+GPUS=1 log-depth/train-by-width.sh 128 256 512 1024 2048 4096
 ```

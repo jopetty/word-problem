@@ -5,6 +5,7 @@ ROOT=${ROOT:-"/net/nfs.cirrascale/allennlp/willm/log-depth"}
 DEPTHS=("$@")
 MODEL="sfirah"
 WIDTH=512
+UNIVERSAL=${UNIVERSAL:-False}
 GPUS=${GPUS:-1}
 
 for depth in "${DEPTHS[@]}"; do
@@ -17,7 +18,7 @@ for depth in "${DEPTHS[@]}"; do
         --priority normal \
         --env-secret "WANDB_API_KEY=WANDB_API_KEY" \
         --gpus $GPUS -- python src/finetune.py \
-            --model "sfirah" \
+            --sfirah \
             --run-name $run_name \
             --d-model $WIDTH \
             --d-ff $((WIDTH * 4)) \
@@ -38,5 +39,6 @@ for depth in "${DEPTHS[@]}"; do
             --log-steps 100 \
             --eval-steps 100 \
             --indices 0 1 3 7 15 31 63 127 \
-            --lr-schedule "constant"
+            --lr-schedule "constant" \
+            --universal $UNIVERSAL
 done
