@@ -20,7 +20,7 @@ for depth in "${DEPTHS[@]}"; do
             --model "sfirah" \
             --run-name $run_name \
             --d-model $WIDTH \
-            --d-ff $D_FF \
+            --d-ff $((WIDTH * 4)) \
             --depth $depth \
             --train-paths \
                 $ROOT/data/2/train.csv \

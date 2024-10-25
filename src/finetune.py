@@ -21,6 +21,8 @@ from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifie
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
+# Disable transformer library's WANDB integration and use custom callback.
+os.environ["WANDB_DISABLED"] = "true"
 os.environ["WANDB_PROJECT"] = "log-depth"
 os.environ["WANDB_LOG_MODEL"] = "checkpoint"
 
