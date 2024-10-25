@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 os.environ["WANDB_PROJECT"] = "log-depth"
-os.environ["WANDB_LOG_MODEL"] = "end"
+os.environ["WANDB_LOG_MODEL"] = "checkpoint"
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -113,6 +113,7 @@ def main(args):
     #     name=run_name,
     #     tags=args.tags,
     #     group=run_name,
+    #     config=dict(args),
     # )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
