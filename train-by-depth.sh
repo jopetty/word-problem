@@ -1,12 +1,13 @@
 #!/bin/bash
 # Easily launch finetuning jobs on Gantry.
 
-SIZES=("$@")
 ROOT=${ROOT:-"/net/nfs.cirrascale/allennlp/willm/log-depth"}
-SUFFIX=${SUFFIX:""}  # Can set to "-deduped"
+DEPTHS=("$@")
+MODEL="sfirah"
+WIDTH=512
 GPUS=${GPUS:-1}
 
-for size in "${SIZES[@]}"; do
+for depth in "${DEPTHS[@]}"; do
     model="pythia-$size$SUFFIX"
     echo "===== $model ====="
     printf "$model" | gantry run \
@@ -16,7 +17,10 @@ for size in "${SIZES[@]}"; do
         --priority normal \
         --env-secret "WANDB_API_KEY=WANDB_API_KEY" \
         --gpus $GPUS -- python src/finetune.py \
-            --model "EleutherAI/$model" \
+            --model $MODEL \
+            --d-model $WIDTH \
+            --d-ff $D_FF \
+            --depth $depth \
             --train-paths \
                 $ROOT/data/2/train.csv \
                 $ROOT/data/4/train.csv \

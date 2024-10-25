@@ -16,6 +16,8 @@ from transformers import (
     TrainerCallback,
 )
 
+from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifier
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
@@ -35,6 +37,14 @@ def parse_args():
     parser.add_argument("--warmup-steps", type=int, default=500)
     parser.add_argument("--lr-schedule", type=str, choices=["linear", "constant"], default="linear")
     parser.add_argument("--tags", type=str, nargs="+", default=[])
+    parser.add_argument("--weight-decay", type=float, default=0.01)
+    parser.add_argument("--dropout", type=float, default=0.)
+    # These parameters are for randomly initialized models.
+    parser.add_argument("--d-model", type=int, default=512)
+    parser.add_argument("--n-heads", type=int, default=8)
+    parser.add_argument("--d-ff", type=int, default=2048)
+    parser.add_argument("--depth", type=int, default=6)
+    parser.add_argument("--universal", action="store_true")
     # These parameters are pretty stable/not worth changing.
     parser.add_argument("--save-steps", type=int, default=-1)
     parser.add_argument("--eval-batch-size", type=int, default=100)
@@ -99,28 +109,47 @@ class WandbStepCallback(TrainerCallback):
             # Adjust the step to continue from phase 1
             adjusted_step = self.global_step + state.global_step
             logs['step'] = adjusted_step
-            wandb.log(logs)
+            wandb.log(logs, step=adjusted_step)
     
     def on_train_end(self, args, state, control, **kwargs):
         # Does this fix the weird `fake_trainer` issue?
         pass
 
-def main(args):
-    run_name = args.model.split("/")[-1]
-    # FIXME: Weird error with `fake_trainer` here.
-    # wandb.init(
-    #     project=os.environ["WANDB_PROJECT"],
-    #     name=run_name,
-    #     tags=args.tags,
-    #     group=run_name,
-    #     config=dict(args),
-    # )
+def get_model(args) -> tuple[str, nn.Model]:
+    if args.model == "sfirah":
+        name = f"sfirah-w{args.d_model}-d{args.depth}"
+        model = EncoderTokenClassifier(
+            d_model=args.d_model,
+            n_heads=args.n_heads,
+            d_ff=args.d_ff,
+            dropout=args.dropout,
+            norm_first=True,
+            n_layers=args.depth,
+            weight_sharing=args.universal,
+            weight_decay=args.weight_decay,
+        )
+    else:
+        name = args.model.split("/")[-1]
+        model = AutoModelForTokenClassification.from_pretrained(args.model, num_labels=args.group_size)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    evaluator = Evaluator(args.indices, args.eps)
-    model = AutoModelForTokenClassification.from_pretrained(args.model, num_labels=args.group_size)
     if torch.cuda.is_available():
         model.to("cuda")
+
+    return name, model
+
+def main(args):
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    evaluator = Evaluator(args.indices, args.eps)
+    run_name, model = get_model(args)
+
+    # FIXME: Weird error with `fake_trainer` here with WANDB integration.
+    wandb.init(
+        project=os.environ["WANDB_PROJECT"],
+        name=run_name,
+        tags=args.tags,
+        group=run_name,
+        config=dict(args),
+    )
 
     global_step = 0
     for idx, train_path in enumerate(args.train_paths):
@@ -132,8 +161,7 @@ def main(args):
             per_device_train_batch_size=args.batch_size,
             per_device_eval_batch_size=args.batch_size,
             lr_scheduler_type=args.lr_schedule,
-            weight_decay=0.01,
-            report_to="wandb",
+            weight_decay=args.weight-decay,
             run_name=run_name,
             logging_steps=args.log_steps,
             eval_strategy="steps",
@@ -152,7 +180,7 @@ def main(args):
         trainer.add_callback(WandbStepCallback(global_step))
         trainer.train()
         global_step = trainer.state.global_step
-        wandb.log({"phase": idx})
+        wandb.log({"phase": idx}, step=global_step)
 
 if __name__ == "__main__":
     main(parse_args())
