@@ -20,9 +20,10 @@ from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifie
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+log.addHandler(ch)
 
-# Disable transformer library's WANDB integration and use custom callback.
-os.environ["WANDB_DISABLED"] = "true"
 os.environ["WANDB_PROJECT"] = "log-depth"
 os.environ["WANDB_LOG_MODEL"] = "checkpoint"
 
@@ -112,7 +113,7 @@ class WandbStepCallback(TrainerCallback):
         if logs is not None:
             # Adjust the step to continue from phase 1
             adjusted_step = self.global_step + state.global_step
-            logs['step'] = adjusted_step
+            logs["step"] = adjusted_step
             wandb.log(logs, step=adjusted_step)
     
     def on_train_end(self, args, state, control, **kwargs):
@@ -176,6 +177,7 @@ def main(args):
             eval_steps=args.eval_steps,
             save_steps=args.save_steps,
             warmup_steps=args.warmup_steps,
+            report_to=[],
         )
         trainer = Trainer(
             model=model,
