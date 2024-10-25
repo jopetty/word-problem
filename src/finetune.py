@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 os.environ["WANDB_PROJECT"] = "log-depth"
-os.environ["WANDB_LOG_MODEL"] = "end"
+os.environ["WANDB_LOG_MODEL"] = "steps"
 
 def parse_args():
     parser = argparse.ArgumentParser()
