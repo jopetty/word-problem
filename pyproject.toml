@@ -18,7 +18,7 @@ dependencies = [
     "fire >= 0.5",
     "s4 @ git+https://github.com/jopetty/s4.git",
     "abstract_algebra @ git+https://github.com/jopetty/abstract_algebra",
-    "sfirah @ git+https://github.com/jopetty/sfirah ; sys_platform == 'darwin'",
+    "sfirah @ git+https://github.com/jopetty/sfirah",
     "humanize >= 4.9",
     "ipykernel >= 6.27",
     "numpy >= 1.26",
