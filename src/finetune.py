@@ -108,17 +108,20 @@ class Evaluator:
 class WandbStepCallback(TrainerCallback):
     def __init__(self, global_step: int):
         self.global_step = global_step
+    
+    def get_step(self, state) -> int:
+        return self.global_step + state.global_step
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         if logs is not None:
-            # Adjust the step to continue from phase 1
-            adjusted_step = self.global_step + state.global_step
-            logs["step"] = adjusted_step
-            wandb.log(logs, step=adjusted_step)
+            wandb.log(logs, step=self.get_step(state))
     
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        if metrics:
+            wandb.log(metrics, step=self.get_step(state))
+
     def on_train_end(self, args, state, control, **kwargs):
-        # Does this fix the weird `fake_trainer` issue?
-        pass
+        wandb.log({"training_completed": True}, step=state.get_step(state))
 
 def get_model(args) -> tuple[str, torch.nn.Module]:
     if args.sfirah:
