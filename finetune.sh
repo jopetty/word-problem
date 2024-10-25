@@ -1,16 +1,19 @@
 #!/bin/bash
 
+args=("$@")
+for arg in "${args[@]}"; do
+    echo $arg
+done
+exit
+
+SIZES=("$@")
 ROOT=${ROOT:-"/net/nfs.cirrascale/allennlp/willm/log-depth"}
 SUFFIX=${SUFFIX:""}  # Can set to "-deduped"
-# SIZES=("14m" "31m" "70m" "160m" "410m" "1b" "1.4b" "2.8b" "6.9b" "12b")
-GPUS=(1 1 1 1 1 2 2 2 2 2)
-
-# The ones that don't converge to 128.
-SIZES=("14m" "31m" "70m" "160m")
+GPUS=${GPUS:-1}
 
 mkdir $OUT_DIR/$SAVE
-for idx in "${!SIZES[@]}"; do
-    model="pythia-${SIZES[idx]}$SUFFIX"
+for size in "${SIZES[@]}"; do
+    model="pythia-$size$SUFFIX"
     echo "===== $model ====="
     printf "$model" | gantry run \
         --workspace ai2/rusty-dawg \
@@ -18,7 +21,7 @@ for idx in "${!SIZES[@]}"; do
         --budget ai2/allennlp \
         --priority normal \
         --env-secret "WANDB_API_KEY=WANDB_API_KEY" \
-        --gpus ${GPUS[idx]} -- python src/finetune.py \
+        --gpus $GPUS -- python src/finetune.py \
             --model "EleutherAI/$model" \
             --train-paths \
                 $ROOT/data/2/train.csv \
@@ -28,7 +31,7 @@ for idx in "${!SIZES[@]}"; do
                 $ROOT/data/32/train.csv \
                 $ROOT/data/64/train.csv \
                 $ROOT/data/128/train.csv \
-            --val-path $ROOT/data/128/val.csv \
+            --eval-path $ROOT/data/128/val.csv \
             --results-dir $ROOT/checkpoints/$model \
             --logs-dir $ROOT/checkpoints/$model/logs \
             --batch-size 64 \

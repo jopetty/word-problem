@@ -146,8 +146,8 @@ for k in "${KS[@]}"; do
 done
 ```
 
-Switching to using Gantry to run finetuning:
+Can easily launch finetuning jobs on Gantry with the following:
 
 ```shell
-./finetune.sh
+GPUS=1 ./finetune.sh "14m" "31m" "70m" "160m"
 ```

@@ -20,13 +20,13 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 os.environ["WANDB_PROJECT"] = "log-depth"
-os.environ["WANDB_LOG_MODEL"] = "checkpoint"
+os.environ["WANDB_LOG_MODEL"] = "end"
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="EleutherAI/pythia-70m")
     parser.add_argument("--train-paths", type=str, nargs="+", required=True)
-    parser.add_argument("--val-path", type=str, required=True)
+    parser.add_argument("--eval-path", type=str, required=True)
     parser.add_argument("--results-dir", type=str, required=True)
     parser.add_argument("--logs-dir", type=str, required=True)
     parser.add_argument("--batch-size", type=int, default=32)
@@ -103,12 +103,13 @@ class WandbStepCallback(TrainerCallback):
 
 def main(args):
     run_name = args.model.split("/")[-1]
-    wandb.init(
-        project=os.environ["WANDB_PROJECT"],
-        name=run_name,
-        tags=args.tags,
-        group=run_name,
-    )
+    # FIXME: Weird error with `fake_trainer` here.
+    # wandb.init(
+    #     project=os.environ["WANDB_PROJECT"],
+    #     name=run_name,
+    #     tags=args.tags,
+    #     group=run_name,
+    # )
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     evaluator = Evaluator(args.indices, args.eps)
@@ -140,7 +141,7 @@ def main(args):
             model=model,
             args=training_args,
             train_dataset=GroupDataset.from_csv(train_path, tokenizer),
-            eval_dataset=GroupDataset.from_csv(args.val_path, tokenizer),
+            eval_dataset=GroupDataset.from_csv(args.eval_path, tokenizer),
             compute_metrics=evaluator.compute_metrics,
         )
         trainer.add_callback(WandbStepCallback(global_step))
