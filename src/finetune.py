@@ -135,7 +135,7 @@ def get_model(args) -> tuple[str, torch.nn.Module]:
             norm_first=True,
             n_layers=args.depth,
             weight_sharing=args.universal,
-            weight_decay=args.weight_decay,
+            # weight_decay=args.weight_decay,  # FIXME: not supported! use dropout instead?
         )
     else:
         name = args.model.split("/")[-1]
