@@ -1,10 +1,5 @@
 #!/bin/bash
-
-args=("$@")
-for arg in "${args[@]}"; do
-    echo $arg
-done
-exit
+# Easily launch finetuning jobs on Gantry.
 
 SIZES=("$@")
 ROOT=${ROOT:-"/net/nfs.cirrascale/allennlp/willm/log-depth"}
