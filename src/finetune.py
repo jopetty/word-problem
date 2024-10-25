@@ -121,7 +121,7 @@ class WandbStepCallback(TrainerCallback):
             wandb.log(metrics, step=self.get_step(state))
 
     def on_train_end(self, args, state, control, **kwargs):
-        wandb.log({"training_completed": True}, step=state.get_step(state))
+        wandb.log({"training_completed": True}, step=self.get_step(state))
 
 def get_model(args) -> tuple[str, torch.nn.Module]:
     if args.sfirah:
