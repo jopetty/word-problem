@@ -152,7 +152,7 @@ def main(args):
         name=run_name,
         tags=args.tags,
         group=run_name,
-        config=dict(args),
+        config=vars(args),
     )
 
     global_step = 0
