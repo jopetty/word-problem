@@ -10,6 +10,9 @@ GPUS=${GPUS:-1}
 
 for width in "${WIDTHS[@]}"; do
     run_name="$MODEL-w$width"
+    if [ "$UNIVERSAL" = True ]; then
+        run_name="$run_name-u"
+    fi
     echo "===== $run_name ====="
     printf $run_name | gantry run \
         --workspace ai2/rusty-dawg \
