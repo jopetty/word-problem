@@ -149,7 +149,7 @@ done
 Can easily launch finetuning, depth, and width jobs on Gantry:
 
 ```shell
-export WANDB_PROJECT="log-depth-10-27"
+export WANDB_PROJECT="log-depth-clean"
 for i in {1..10}; do
     GPUS=1 log-depth/finetune.sh "14m" "31m" "70m" "160m" "410m"
     GPUS=1 log-depth/train-by-depth.sh 6 9 12 15 18 21 24
