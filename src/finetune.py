@@ -86,7 +86,6 @@ class GroupDataset(Dataset):
         target_text = self.csv.target[idx]
         # Pythia tokenizer seems to correctly map each integer to its own token.
         input_ids = self.tokenizer(input_text).input_ids
-        breakpoint()
         # Convert to list of integers in range [0, group_size).
         labels = [int(x) for x in target_text.split()]
         assert len(input_ids) == len(labels), \
@@ -115,10 +114,12 @@ class Evaluator:
         return results
 
 class WrapEncoderTokenClassifer(Module):
-    def __init__(self, model, classifer):
+    """Wrapper class for sfirah TokenClassifiers to match HuggingFace API."""
+
+    def __init__(self, model, criterion):
+        super().__init__()
         self.model = model
-        self.classifier = classifier
-        self.criterion = torch.nn.CrossEntropyLoss()
+        self.criterion = criterion
     
     @classmethod
     def from_args(cls, args):
@@ -138,12 +139,16 @@ class WrapEncoderTokenClassifer(Module):
             weight_sharing=args.universal,
         )
         # FIXME: Weight decay not supported in args!
-        classifier = torch.nn.Linear(d_model, group_size)
-        return cls(model, classifier)
+        criterion = torch.nn.CrossEntropyLoss()
+        return cls(model, criterion)
 
     def forward(self, input_ids, labels):
-        logits = self.model(input_ids=input_ids, mask=torch.ones_like(input_ids))
-        loss = self.criterion(logits, labels)
+        """See src/main.py for a reference of this."""
+        mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            input_ids.shape[1], device=input_ids.device
+        )
+        logits = self.model(input_ids, mask=mask, is_causal=True)
+        loss = self.criterion(logits.flatten(end_dim=-2), labels.flatten())
         return TokenClassifierOutput(logits=logits, loss=loss)
 
 class WandbStepCallback(TrainerCallback):
