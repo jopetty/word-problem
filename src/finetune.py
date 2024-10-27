@@ -57,6 +57,7 @@ def parse_args():
     parser.add_argument("--group-size", type=int, default=60)
     parser.add_argument("--indices", type=int, nargs="+", default=[0, 1, 5, 10, 100, 1000])
     parser.add_argument("--eps", type=float, nargs="+", default=[0.05])
+    parser.add_argument("--wandb-project", type=str, default=None)
     return parser.parse_args()
 
 class LiteralTokenizer:
@@ -181,6 +182,12 @@ def get_model(args) -> tuple[str, Module]:
 
     return name, tokenizer, model
 
+def _get_wandb_project(args):
+    """Get the WandB project name from the command line or environment."""
+    if args.wandb_project is not None:
+        return args.wandb_project
+    return os.environ.get("WANDB_PROJECT", "log-depth")
+
 def main(args):
     evaluator = Evaluator(args.indices, args.eps)
     run_name, tokenizer, model = get_model(args)
@@ -188,7 +195,7 @@ def main(args):
         run_name = args.run_name
 
     wandb.init(
-        project=os.environ.get("WANDB_PROJECT", "log-depth"),
+        project=_get_wandb_project(args),
         name=run_name,
         tags=args.tags,
         group=run_name,

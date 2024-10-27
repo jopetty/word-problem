@@ -7,6 +7,7 @@ MODEL="sfirah"
 WIDTH=512
 UNIVERSAL=${UNIVERSAL:-False}
 GPUS=${GPUS:-1}
+WANDB_PROJECT=${WANDB_PROJECT:-"log-depth"}
 
 for depth in "${DEPTHS[@]}"; do
     run_name="$MODEL-d$depth"
@@ -43,5 +44,6 @@ for depth in "${DEPTHS[@]}"; do
             --eval-steps 100 \
             --indices 0 1 3 7 15 31 63 127 \
             --lr-schedule "constant" \
-            --universal $UNIVERSAL
+            --universal $UNIVERSAL \
+            --wandb-project $WANDB_PROJECT
 done

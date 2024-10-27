@@ -5,6 +5,7 @@ SIZES=("$@")
 ROOT=${ROOT:-"/net/nfs.cirrascale/allennlp/willm/log-depth"}
 SUFFIX=${SUFFIX:""}  # Can set to "-deduped"
 GPUS=${GPUS:-1}
+WANDB_PROJECT=${WANDB_PROJECT:-"log-depth"}
 
 for size in "${SIZES[@]}"; do
     model="pythia-$size$SUFFIX"
@@ -34,5 +35,6 @@ for size in "${SIZES[@]}"; do
             --log-steps 100 \
             --eval-steps 100 \
             --indices 0 1 3 7 15 31 63 127 \
-            --lr-schedule "constant"
+            --lr-schedule "constant" \
+            --wandb-project $WANDB_PROJECT
 done
