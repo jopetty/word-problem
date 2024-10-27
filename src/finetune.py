@@ -27,9 +27,6 @@ ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 log.addHandler(ch)
 
-os.environ["WANDB_PROJECT"] = "log-depth"
-os.environ["WANDB_LOG_MODEL"] = "checkpoint"
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="EleutherAI/pythia-70m")
@@ -60,6 +57,7 @@ def parse_args():
     parser.add_argument("--group-size", type=int, default=60)
     parser.add_argument("--indices", type=int, nargs="+", default=[0, 1, 5, 10, 100, 1000])
     parser.add_argument("--eps", type=float, nargs="+", default=[0.05])
+    parser.add_argument("--wandb-project", type=str, default="log-depth")
     return parser.parse_args()
 
 class LiteralTokenizer:
@@ -192,7 +190,7 @@ def main(args):
 
     # FIXME: Weird error with `fake_trainer` here with WANDB integration.
     wandb.init(
-        project=os.environ["WANDB_PROJECT"],
+        project=args.wandb_project,
         name=run_name,
         tags=args.tags,
         group=run_name,
