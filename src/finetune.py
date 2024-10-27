@@ -202,7 +202,7 @@ def main(args):
         config=vars(args),
     )
 
-    global_step = 0
+    wandb_callback = WandbStepCallback(0)
     for idx, train_path in enumerate(args.train_paths):
         log.info(f"Training {run_name} on {train_path}...")
         training_args = TrainingArguments(
@@ -229,10 +229,10 @@ def main(args):
             eval_dataset=GroupDataset.from_csv(args.eval_path, tokenizer),
             compute_metrics=evaluator.compute_metrics,
         )
-        trainer.add_callback(WandbStepCallback(global_step))
+        trainer.add_callback(wandb_callback)
         trainer.train()
-        global_step = trainer.state.global_step
-        wandb.log({"phase": idx}, step=global_step)
+        wandb_callback.global_step += trainer.state.global_step
+        wandb.log({"phase": idx}, step=wandb_callback.global_step)
 
 if __name__ == "__main__":
     main(parse_args())
