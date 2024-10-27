@@ -134,25 +134,16 @@ I removed the following line from pyproject.toml since we don't need SSM depende
 
 To generate data:
 ```shell
-ROOT="/net/nfs.cirrascale/allennlp/willm/log-depth"
-N_TRAIN=1000000
-N_VAL=1000
-KS=("2" "4" "8" "16" "32" "64" "128")
-
-for k in "${KS[@]}"; do
-    mkdir $ROOT/data/$k
-    python src/generate_data.py A5 --k $k --data-path $ROOT/data/$k/train.csv --samples $N_TRAIN
-    python src/generate_data.py A5 --k $k --data-path $ROOT/data/$k/val.csv --samples $N_VAL
-done
+export ROOT="/net/nfs.cirrascale/allennlp/willm/log-depth"
+log-depth/generate-data.sh
 ```
 
 Can easily launch finetuning, depth, and width jobs on Gantry:
-
 ```shell
 export WANDB_PROJECT="log-depth-clean"
-for i in {1..10}; do
+for i in {1..5}; do
     GPUS=1 log-depth/finetune.sh "14m" "31m" "70m" "160m"
-    GPUS=1 log-depth/train-by-depth.sh 6 9 12 15 18 21 24
-    GPUS=1 log-depth/train-by-width.sh 128 256 512 1024 2048
+    GPUS=1 log-depth/train-by-depth.sh 6 12 18 24
+    GPUS=1 log-depth/train-by-width.sh 128 256 512 1024
 done
 ```

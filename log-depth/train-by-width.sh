@@ -40,9 +40,10 @@ for width in "${WIDTHS[@]}"; do
             --logs-dir $ROOT/checkpoints/$model/logs \
             --batch-size 64 \
             --warmup-steps 500 \
-            --log-steps 100 \
-            --eval-steps 100 \
+            --log-steps 1000 \
+            --eval-steps 1000 \
             --indices 0 1 3 7 15 31 63 127 \
+            --eps 0.05 0.5 \
             --lr-schedule "constant" \
             --universal $UNIVERSAL \
             --wandb-project $WANDB_PROJECT
