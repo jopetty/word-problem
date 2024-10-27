@@ -57,7 +57,6 @@ def parse_args():
     parser.add_argument("--group-size", type=int, default=60)
     parser.add_argument("--indices", type=int, nargs="+", default=[0, 1, 5, 10, 100, 1000])
     parser.add_argument("--eps", type=float, nargs="+", default=[0.05])
-    parser.add_argument("--wandb-project", type=str, default="log-depth")
     return parser.parse_args()
 
 class LiteralTokenizer:
@@ -188,9 +187,8 @@ def main(args):
     if args.run_name is not None:
         run_name = args.run_name
 
-    # FIXME: Weird error with `fake_trainer` here with WANDB integration.
     wandb.init(
-        project=args.wandb_project,
+        project=os.environ.get("WANDB_PROJECT", "log-depth"),
         name=run_name,
         tags=args.tags,
         group=run_name,
