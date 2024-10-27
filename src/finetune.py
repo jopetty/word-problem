@@ -14,6 +14,7 @@ from transformers import (
     TrainingArguments,
     Trainer,
     TrainerCallback,
+    BatchEncoding,
 )
 
 from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifier
@@ -44,7 +45,6 @@ def parse_args():
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--dropout", type=float, default=0.)
     # These parameters are for randomly initialized models.
-    parser.add_argument("--sfirah", action="store_true", help="Use fresh model from sfirah codebase.")
     parser.add_argument("--d-model", type=int, default=512)
     parser.add_argument("--n-heads", type=int, default=8)
     parser.add_argument("--d-ff", type=int, default=2048)
@@ -58,6 +58,11 @@ def parse_args():
     parser.add_argument("--indices", type=int, nargs="+", default=[0, 1, 5, 10, 100, 1000])
     parser.add_argument("--eps", type=float, nargs="+", default=[0.05])
     return parser.parse_args()
+
+class LiteralTokenizer:
+    def __call__(self, text) -> BatchEncoding:
+        tokens = [int(x) for x in text.split()]
+        return BatchEncoding({"input_ids": tokens})
 
 class GroupDataset(Dataset):
     """Dataset to load group data saved as a CSV."""
@@ -124,14 +129,20 @@ class WandbStepCallback(TrainerCallback):
         wandb.log({"training_completed": True}, step=self.get_step(state))
 
 def get_model(args) -> tuple[str, torch.nn.Module]:
-    if args.sfirah:
+    if args.model == "sfirah":
         # raise NotImplementedError("sfirah models are not yet supported.")
         name = f"sfirah-w{args.d_model}-d{args.depth}"
+        tokenizer = LiteralTokenizer()
         model = EncoderTokenClassifier(
             d_model=args.d_model,
             n_heads=args.n_heads,
             d_ff=args.d_ff,
             dropout=args.dropout,
+            activation= "gelu",
+            layer_norm_eps= 1e-5,
+            n_vocab=args.group_size,
+            weight_scale=1.,
+            batch_first=True,
             norm_first=True,
             n_layers=args.depth,
             weight_sharing=args.universal,
@@ -139,17 +150,17 @@ def get_model(args) -> tuple[str, torch.nn.Module]:
         )
     else:
         name = args.model.split("/")[-1]
+        tokenizer = AutoTokenizer.from_pretrained(args.model)
         model = AutoModelForTokenClassification.from_pretrained(args.model, num_labels=args.group_size)
 
     if torch.cuda.is_available():
         model.to("cuda")
 
-    return name, model
+    return name, tokenizer, model
 
 def main(args):
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
     evaluator = Evaluator(args.indices, args.eps)
-    run_name, model = get_model(args)
+    run_name, tokenizer, model = get_model(args)
     if args.run_name is not None:
         run_name = args.run_name
 

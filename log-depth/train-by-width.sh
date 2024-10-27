@@ -18,7 +18,7 @@ for width in "${WIDTHS[@]}"; do
         --priority normal \
         --env-secret "WANDB_API_KEY=WANDB_API_KEY" \
         --gpus $GPUS -- python src/finetune.py \
-            --sfirah \
+            --model "sfirah" \
             --run-name $run_name \
             --d-model $width \
             --d-ff $((width * 4)) \
