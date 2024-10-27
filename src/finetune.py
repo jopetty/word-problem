@@ -48,6 +48,7 @@ def parse_args():
     parser.add_argument("--d-model", type=int, default=512)
     parser.add_argument("--n-heads", type=int, default=8)
     parser.add_argument("--d-ff", type=int, default=2048)
+    parser.add_argument("--bias", type=bool, default=True)
     parser.add_argument("--depth", type=int, default=6)
     parser.add_argument("--universal", type=bool, default=False)
     # These parameters are pretty stable/not worth changing.
@@ -143,6 +144,7 @@ def get_model(args) -> tuple[str, torch.nn.Module]:
             n_vocab=args.group_size,
             weight_scale=1.,
             batch_first=True,
+            bias=args.bias,
             norm_first=True,
             n_layers=args.depth,
             weight_sharing=args.universal,
