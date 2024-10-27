@@ -1,13 +1,14 @@
 import argparse
 import logging
-import transformers
 import torch
 import pandas as pd
+from torch.nn import Module
 from torch.utils.data import Dataset
 import os
 import numpy as np
 import wandb
 
+import transformers
 from transformers import (
     AutoTokenizer,
     AutoModelForTokenClassification,
@@ -16,6 +17,7 @@ from transformers import (
     TrainerCallback,
     BatchEncoding,
 )
+from transformers.modeling_outputs import TokenClassifierOutput
 
 from sfirah.transformers import EncoderSequenceClassifier, EncoderTokenClassifier
 
@@ -63,7 +65,7 @@ def parse_args():
 class LiteralTokenizer:
     def __call__(self, text) -> BatchEncoding:
         tokens = [int(x) for x in text.split()]
-        return BatchEncoding({"input_ids": tokens})
+        return BatchEncoding({"input_ids": tokens, "attention_mask": [1] * len(tokens)})
 
 class GroupDataset(Dataset):
     """Dataset to load group data saved as a CSV."""
@@ -84,6 +86,7 @@ class GroupDataset(Dataset):
         target_text = self.csv.target[idx]
         # Pythia tokenizer seems to correctly map each integer to its own token.
         input_ids = self.tokenizer(input_text).input_ids
+        breakpoint()
         # Convert to list of integers in range [0, group_size).
         labels = [int(x) for x in target_text.split()]
         assert len(input_ids) == len(labels), \
@@ -111,6 +114,38 @@ class Evaluator:
             results[f"n@{eps}"] = failures.min().item() if len(failures) > 0 else len(accs_by_idx)
         return results
 
+class WrapEncoderTokenClassifer(Module):
+    def __init__(self, model, classifer):
+        self.model = model
+        self.classifier = classifier
+        self.criterion = torch.nn.CrossEntropyLoss()
+    
+    @classmethod
+    def from_args(cls, args):
+        model = EncoderTokenClassifier(
+            d_model=args.d_model,
+            n_heads=args.n_heads,
+            d_ff=args.d_ff,
+            dropout=args.dropout,
+            activation= "gelu",
+            layer_norm_eps= 1e-5,
+            n_vocab=args.group_size,
+            weight_scale=1.,
+            batch_first=True,
+            bias=args.bias,
+            norm_first=True,
+            n_layers=args.depth,
+            weight_sharing=args.universal,
+        )
+        # FIXME: Weight decay not supported in args!
+        classifier = torch.nn.Linear(d_model, group_size)
+        return cls(model, classifier)
+
+    def forward(self, input_ids, labels):
+        logits = self.model(input_ids=input_ids, mask=torch.ones_like(input_ids))
+        loss = self.criterion(logits, labels)
+        return TokenClassifierOutput(logits=logits, loss=loss)
+
 class WandbStepCallback(TrainerCallback):
     def __init__(self, global_step: int):
         self.global_step = global_step
@@ -129,27 +164,11 @@ class WandbStepCallback(TrainerCallback):
     def on_train_end(self, args, state, control, **kwargs):
         wandb.log({"training_completed": True}, step=self.get_step(state))
 
-def get_model(args) -> tuple[str, torch.nn.Module]:
+def get_model(args) -> tuple[str, Module]:
     if args.model == "sfirah":
-        # raise NotImplementedError("sfirah models are not yet supported.")
         name = f"sfirah-w{args.d_model}-d{args.depth}"
         tokenizer = LiteralTokenizer()
-        model = EncoderTokenClassifier(
-            d_model=args.d_model,
-            n_heads=args.n_heads,
-            d_ff=args.d_ff,
-            dropout=args.dropout,
-            activation= "gelu",
-            layer_norm_eps= 1e-5,
-            n_vocab=args.group_size,
-            weight_scale=1.,
-            batch_first=True,
-            bias=args.bias,
-            norm_first=True,
-            n_layers=args.depth,
-            weight_sharing=args.universal,
-            # weight_decay=args.weight_decay,  # FIXME: not supported! use dropout instead?
-        )
+        model = WrapEncoderTokenClassifer.from_args(args)
     else:
         name = args.model.split("/")[-1]
         tokenizer = AutoTokenizer.from_pretrained(args.model)
