@@ -8,6 +8,7 @@ WIDTH=512
 UNIVERSAL=${UNIVERSAL:-False}
 GPUS=${GPUS:-1}
 WANDB_PROJECT=${WANDB_PROJECT:-"log-depth"}
+BATCH_SIZE=${BATCH_SIZE:-64}
 
 for depth in "${DEPTHS[@]}"; do
     run_name="$MODEL-d$depth"
@@ -35,14 +36,16 @@ for depth in "${DEPTHS[@]}"; do
                 $ROOT/data/32/train.csv \
                 $ROOT/data/64/train.csv \
                 $ROOT/data/128/train.csv \
-            --eval-path $ROOT/data/128/val.csv \
+                $ROOT/data/256/train.csv \
+                $ROOT/data/512/train.csv \
+            --eval-path $ROOT/data/512/val.csv \
             --results-dir $ROOT/checkpoints/$model \
             --logs-dir $ROOT/checkpoints/$model/logs \
-            --batch-size 64 \
+            --batch-size $BATCH_SIZE \
             --warmup-steps 500 \
             --log-steps 1000 \
             --eval-steps 1000 \
-            --indices 0 1 3 7 15 31 63 127 \
+            --indices 0 1 3 7 15 31 63 127 255 511 \
             --eps 0.05 0.5 \
             --lr-schedule "constant" \
             --universal $UNIVERSAL \

@@ -138,12 +138,26 @@ export ROOT="/net/nfs.cirrascale/allennlp/willm/log-depth"
 log-depth/generate-data.sh
 ```
 
-Can easily launch finetuning, depth, and width jobs on Gantry:
+Can easily launch finetuning, depth, and width jobs on Gantry.
+Initially I launched 5 samples of 12 different configs, for a total of 60 runs.
 ```shell
 export WANDB_PROJECT="log-depth-clean"
+export BATCH_SIZE=64
 for i in {1..5}; do
     GPUS=1 log-depth/finetune.sh "14m" "31m" "70m" "160m"
     GPUS=1 log-depth/train-by-depth.sh 6 12 18 24
     GPUS=1 log-depth/train-by-width.sh 128 256 512 1024
+done
+```
+
+Originally, I ran the above only training up to length 128.
+We can launch 27 more training runs, each of which should take about 4x longer than the earlier ones.
+I doubled the batch size in the hope of speeding things up (and because the original was fairly small).
+```shell
+export WANDB_PROJECT="log-depth-clean"
+export BATCH_SIZE=128
+for i in {1..3}; do
+    GPUS=1 log-depth/train-by-depth.sh 9 12 15 21 24
+    GPUS=2 log-depth/finetune.sh "160m" "410m" "1b" "1.4b"
 done
 ```
