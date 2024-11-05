@@ -161,3 +161,16 @@ for i in {1..3}; do
     GPUS=2 log-depth/finetune.sh "160m" "410m" "1b" "1.4b"
 done
 ```
+
+It might be worth experimenting with a larger batch size.
+This will make things faster and might also just improve performance.
+Also, should we define batch size by tokens or number of examples?
+For example, Pythia used a batch size of 2,097,152 tokens (about 1024 examples).
+
+To launch more experiments, look into using ai2/saturn-cirrascale
+
+### Plotting Results
+
+```shell
+python src/plot.py
+```
