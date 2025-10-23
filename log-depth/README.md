@@ -1,6 +1,6 @@
-# Experiments for state tracking with log-depth experiments
+# Transformer depth and state tracking
 
-[*A Little Depth Goes a Long Way: The Expressive Power of Log-Depth Transformers*](https://arxiv.org/abs/2503.03961)
+[*A Little Depth Goes a Long Way: The Expressive Power of Log-Depth Transformers*](https://arxiv.org/abs/2503.03961)<br/>
 William Merrill, Ashish Sabharwal
 
 To appear at NeurIPS 2025.
